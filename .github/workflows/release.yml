@@ -1,0 +1,86 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Linux x64 binary
+        run: cargo build --release
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/faktury dist/faktury-linux-x64
+          tar -czvf faktury-linux-x64.tar.gz -C dist faktury-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faktury-linux-x64
+          path: faktury-linux-x64.tar.gz
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build macOS ARM64 binary
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/faktury dist/faktury-macos-arm64
+          tar -czvf faktury-macos-arm64.tar.gz -C dist faktury-macos-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faktury-macos-arm64
+          path: faktury-macos-arm64.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Windows x64 binary
+        run: cargo build --release
+      - name: Package binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/faktury.exe dist/faktury-windows-x64.exe
+          Compress-Archive -Path dist/faktury-windows-x64.exe -DestinationPath faktury-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faktury-windows-x64
+          path: faktury-windows-x64.zip
+
+  publish-release:
+    needs: [build-linux, build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes artifacts/*
