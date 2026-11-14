@@ -14,6 +14,8 @@ chrono = { version = "0.4", features = ["serde"] }
 open = "5"
 typst-as-lib = { version = "0.17", features = ["packages", "ureq"] }
 typst-pdf = "0.15"
+directories = "5"
+toml = "0.8"
 
 [build-dependencies]
 slint-build = "1.9"

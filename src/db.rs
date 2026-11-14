@@ -1,6 +1,6 @@
 use rusqlite::{Connection, OptionalExtension, Result, params};
 
-use crate::models::{Customer, Invoice, LineItem, Supplier};
+use crate::models::{Customer, Invoice, LineItem};
 
 // ---------------------------------------------------------------------------
 // Schema initialisation
@@ -8,19 +8,6 @@ use crate::models::{Customer, Invoice, LineItem, Supplier};
 
 pub fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch("
-        CREATE TABLE IF NOT EXISTS supplier (
-            id               INTEGER PRIMARY KEY CHECK (id = 1),
-            name             TEXT NOT NULL DEFAULT '',
-            reg_id           TEXT NOT NULL DEFAULT '',
-            vat_id           TEXT NOT NULL DEFAULT '',
-            street           TEXT NOT NULL DEFAULT '',
-            zip              TEXT NOT NULL DEFAULT '',
-            city             TEXT NOT NULL DEFAULT '',
-            account_cz       TEXT NOT NULL DEFAULT '',
-            iban             TEXT NOT NULL DEFAULT '',
-            default_due_days INTEGER NOT NULL DEFAULT 14
-        );
-
         CREATE TABLE IF NOT EXISTS invoices (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             number          TEXT NOT NULL,
@@ -120,60 +107,6 @@ pub fn delete_customer(conn: &Connection, ico: &str) -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Supplier
-// ---------------------------------------------------------------------------
-
-pub fn load_supplier(conn: &Connection) -> Result<Option<Supplier>> {
-    let mut stmt = conn.prepare(
-        "SELECT name, reg_id, vat_id, street, zip, city,
-                account_cz, iban, default_due_days
-         FROM supplier WHERE id = 1",
-    )?;
-    let result = stmt.query_row([], |row| {
-        Ok(Supplier {
-            name: row.get(0)?,
-            reg_id: row.get(1)?,
-            vat_id: row.get(2)?,
-            street: row.get(3)?,
-            zip: row.get(4)?,
-            city: row.get(5)?,
-            account_cz: row.get(6)?,
-            iban: row.get(7)?,
-            default_due_days: row.get::<_, i64>(8)? as u32,
-        })
-    });
-
-    match result {
-        Ok(s) => Ok(Some(s)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
-pub fn save_supplier(conn: &Connection, s: &Supplier) -> Result<()> {
-    conn.execute(
-        "INSERT INTO supplier
-             (id, name, reg_id, vat_id, street, zip, city,
-              account_cz, iban, default_due_days)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(id) DO UPDATE SET
-             name             = excluded.name,
-             reg_id           = excluded.reg_id,
-             vat_id           = excluded.vat_id,
-             street           = excluded.street,
-             zip              = excluded.zip,
-             city             = excluded.city,
-             account_cz       = excluded.account_cz,
-             iban             = excluded.iban,
-             default_due_days = excluded.default_due_days",
-        params![
-            s.name, s.reg_id, s.vat_id, s.street, s.zip, s.city,
-            s.account_cz, s.iban, s.default_due_days as i64
-        ],
-    )?;
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Invoice numbering

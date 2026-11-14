@@ -1,30 +1,46 @@
 mod ares;
+mod config;
 mod db;
 mod models;
 mod pdf;
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 
 use chrono::{Datelike, Local, NaiveDate};
 use rusqlite::Connection;
 use slint::{Model, VecModel};
 
+use config::AppPaths;
 use models::{
-    compute_totals, format_amount, Customer, Invoice, LineItem, Supplier, TemplateData,
+    compute_totals, format_amount, Customer, Invoice, LineItem, TemplateData,
 };
 
 slint::include_modules!();
 
+fn open_db(paths: &AppPaths) -> rusqlite::Result<Connection> {
+    Connection::open(&paths.db_path())
+}
+
 fn main() {
+    // ── Application paths & configuration ───────────────────────────────
+    let paths = config::resolve_paths();
+    config::ensure_dirs(&paths).expect("Cannot create application directories");
+    config::migrate_legacy_db_if_needed(&paths);
+
+    let app_config = config::load_or_init(&paths).expect("Cannot load application config");
+    config::ensure_default_templates(&paths);
+    let templates = config::list_templates(&paths);
+
+    let config_state = Rc::new(RefCell::new(app_config.clone()));
+    let paths_state = Rc::new(paths.clone());
+
     // ── Database ────────────────────────────────────────────────────────
-    let conn = Connection::open("faktury.db")
-        .expect("Cannot open database faktury.db");
+    let conn = open_db(&paths).expect("Cannot open database faktury.db");
     db::init(&conn).expect("Cannot initialise database schema");
 
-    let supplier = db::load_supplier(&conn)
-        .expect("Cannot read supplier settings")
-        .unwrap_or_default();
+    let supplier = app_config.to_supplier();
 
     let year = Local::now().year();
     let initial_number = db::next_invoice_number(&conn, year)
@@ -50,6 +66,13 @@ fn main() {
     window.set_sup_account(supplier.account_cz.as_str().into());
     window.set_sup_iban(supplier.iban.as_str().into());
     window.set_sup_due_days(supplier.default_due_days as i32);
+
+    // Populate template & output directory settings
+    let tmpl_strings: Vec<slint::SharedString> =
+        templates.into_iter().map(|s| s.as_str().into()).collect();
+    window.set_available_templates(Rc::new(VecModel::from(tmpl_strings)).into());
+    window.set_sup_template(app_config.template.as_str().into());
+    window.set_sup_output_dir(app_config.output_dir.as_str().into());
 
     // Populate new-invoice defaults
     window.set_inv_number(initial_number.as_str().into());
@@ -129,6 +152,7 @@ fn main() {
     {
         let weak = window.as_weak();
         let custs = saved_customers.clone();
+        let p = paths_state.clone();
         window.on_save_customer(move || {
             let win = match weak.upgrade() {
                 Some(w) => w,
@@ -147,7 +171,7 @@ fn main() {
                 win.set_ares_status("Zadejte IČO pro uložení firmy".into());
                 return;
             }
-            let conn = match Connection::open("faktury.db") {
+            let conn = match open_db(&p) {
                 Ok(c) => c,
                 Err(e) => {
                     win.set_ares_status_is_error(true);
@@ -178,6 +202,7 @@ fn main() {
     {
         let weak = window.as_weak();
         let custs = saved_customers.clone();
+        let p = paths_state.clone();
         window.on_delete_saved_customer(move |index| {
             if index <= 0 {
                 return;
@@ -193,7 +218,7 @@ fn main() {
             };
 
             if let Some(ico) = reg_id {
-                let conn = match Connection::open("faktury.db") {
+                let conn = match open_db(&p) {
                     Ok(c) => c,
                     Err(e) => {
                         win.set_ares_status_is_error(true);
@@ -257,7 +282,7 @@ fn main() {
         });
     }
 
-    // ── Callbacks: calendar month navigation ────────────────────────────
+    // ── Callback: calendar navigation ───────────────────────────────────
     {
         let weak = window.as_weak();
         let year_ref = cal_year.clone();
@@ -270,9 +295,9 @@ fn main() {
             };
             let mut y = *year_ref.borrow();
             let mut m = *month_ref.borrow();
-            if m <= 1 {
-                y -= 1;
+            if m == 1 {
                 m = 12;
+                y -= 1;
             } else {
                 m -= 1;
             }
@@ -281,6 +306,7 @@ fn main() {
             update_calendar_view(&win, y, m, *sel_ref.borrow());
         });
     }
+
     {
         let weak = window.as_weak();
         let year_ref = cal_year.clone();
@@ -293,9 +319,9 @@ fn main() {
             };
             let mut y = *year_ref.borrow();
             let mut m = *month_ref.borrow();
-            if m >= 12 {
-                y += 1;
+            if m == 12 {
                 m = 1;
+                y += 1;
             } else {
                 m += 1;
             }
@@ -309,18 +335,23 @@ fn main() {
     {
         let weak = window.as_weak();
         let target_ref = cal_target.clone();
+        let sel_ref = cal_selected.clone();
         window.on_select_calendar_day(move |date_str| {
             let win = match weak.upgrade() {
                 Some(w) => w,
                 None => return,
             };
+            let s = date_str.to_string();
             let target = target_ref.borrow().clone();
+
             if target == "issue" {
-                win.set_inv_issue_date(date_str.clone());
-                update_due_date_from_issue(&win, date_str.as_str());
+                win.set_inv_issue_date(s.as_str().into());
+                update_due_date_from_issue(&win, s.as_str());
             } else {
-                win.set_inv_due_date(date_str);
+                win.set_inv_due_date(s.as_str().into());
             }
+
+            *sel_ref.borrow_mut() = parse_date(s.as_str());
         });
     }
 
@@ -367,25 +398,28 @@ fn main() {
         });
     }
 
-    // ── Callback: save supplier ─────────────────────────────────────────
+    // ── Callback: save supplier & config ────────────────────────────────
     {
         let weak = window.as_weak();
+        let cfg_ref = config_state.clone();
+        let p = paths_state.clone();
         window.on_save_supplier(move || {
             let win = weak.unwrap();
-            let supplier = Supplier {
-                name: win.get_sup_name().to_string(),
-                reg_id: win.get_sup_reg_id().to_string(),
-                vat_id: win.get_sup_vat_id().to_string(),
-                street: win.get_sup_street().to_string(),
-                zip: win.get_sup_zip().to_string(),
-                city: win.get_sup_city().to_string(),
-                account_cz: win.get_sup_account().to_string(),
-                iban: win.get_sup_iban().to_string(),
-                default_due_days: win.get_sup_due_days() as u32,
-            };
-            let conn = Connection::open("faktury.db").unwrap();
-            match db::save_supplier(&conn, &supplier) {
-                Ok(_) => win.set_supplier_status("✓ Uloženo".into()),
+            let mut cfg = cfg_ref.borrow_mut();
+            cfg.name = win.get_sup_name().to_string();
+            cfg.ico = win.get_sup_reg_id().to_string();
+            cfg.dic = win.get_sup_vat_id().to_string();
+            cfg.street = win.get_sup_street().to_string();
+            cfg.zip = win.get_sup_zip().to_string();
+            cfg.city = win.get_sup_city().to_string();
+            cfg.bank_account = win.get_sup_account().to_string();
+            cfg.iban = win.get_sup_iban().to_string();
+            cfg.default_due_days = win.get_sup_due_days().max(1) as u32;
+            cfg.template = win.get_sup_template().to_string();
+            cfg.output_dir = win.get_sup_output_dir().to_string();
+
+            match config::save_config(&p, &cfg) {
+                Ok(_) => win.set_supplier_status("✓ Nastavení uloženo".into()),
                 Err(e) => win.set_supplier_status(
                     format!("Chyba: {}", e).as_str().into(),
                 ),
@@ -400,6 +434,8 @@ fn main() {
         let history_ref = history_model.clone();
         let editing_id = editing_invoice_id.clone();
         let custs_ref = saved_customers.clone();
+        let cfg_ref = config_state.clone();
+        let p = paths_state.clone();
 
         window.on_save_invoice(move || {
             let win = match weak.upgrade() {
@@ -408,11 +444,16 @@ fn main() {
             };
             win.set_invoice_status("Generuji PDF…".into());
 
-            let conn = Connection::open("faktury.db").unwrap();
-            let supplier = db::load_supplier(&conn)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            let conn = match open_db(&p) {
+                Ok(c) => c,
+                Err(e) => {
+                    win.set_invoice_status(format!("Chyba DB: {}", e).as_str().into());
+                    return;
+                }
+            };
+
+            let cfg = cfg_ref.borrow().clone();
+            let supplier = cfg.to_supplier();
 
             let customer = Customer {
                 name: win.get_cust_name().to_string(),
@@ -461,9 +502,10 @@ fn main() {
                 Ok(id) => {
                     let template_data =
                         TemplateData::from_parts(&invoice, &supplier, &customer, &items);
-                    let output_path = pdf::pdf_output_path(&invoice.number);
+                    let output_dir = Path::new(&cfg.output_dir);
+                    let output_path = pdf::pdf_output_path(output_dir, &invoice.number);
 
-                    match pdf::compile(&template_data, &output_path) {
+                    match pdf::compile(&template_data, &p.templates_dir(), &cfg.template, &output_path) {
                         Ok(_) => {
                             let path_str = output_path.to_string_lossy().to_string();
                             let _ = db::set_invoice_pdf_path(&conn, id, &path_str);
@@ -504,6 +546,8 @@ fn main() {
         let weak = window.as_weak();
         let items_ref = items_model.clone();
         let editing_id = editing_invoice_id.clone();
+        let cfg_ref = config_state.clone();
+        let p = paths_state.clone();
 
         window.on_new_empty_invoice(move || {
             let win = match weak.upgrade() {
@@ -511,7 +555,7 @@ fn main() {
                 None => return,
             };
 
-            let conn = match Connection::open("faktury.db") {
+            let conn = match open_db(&p) {
                 Ok(c) => c,
                 Err(e) => {
                     win.set_invoice_status(format!("Chyba DB: {}", e).as_str().into());
@@ -523,13 +567,12 @@ fn main() {
             reset_invoice_form(&win, &items_ref);
             advance_invoice_number(&conn, &win);
 
-            let supplier = db::load_supplier(&conn).ok().flatten().unwrap_or_default();
+            let supplier = cfg_ref.borrow().to_supplier();
             let today = Local::now().date_naive();
             let due = today + chrono::Duration::days(supplier.default_due_days as i64);
             win.set_inv_issue_date(today.format("%d.%m.%Y").to_string().as_str().into());
             win.set_inv_due_date(due.format("%d.%m.%Y").to_string().as_str().into());
             win.set_inv_payment_method("Převodem".into());
-            win.set_selected_customer_index(0);
             win.set_is_editing(false);
             win.set_invoice_status("".into());
         });
@@ -540,6 +583,7 @@ fn main() {
         let weak = window.as_weak();
         let items_ref = items_model.clone();
         let editing_id = editing_invoice_id.clone();
+        let p = paths_state.clone();
 
         window.on_edit_invoice(move |id| {
             let win = match weak.upgrade() {
@@ -547,7 +591,7 @@ fn main() {
                 None => return,
             };
 
-            let conn = match Connection::open("faktury.db") {
+            let conn = match open_db(&p) {
                 Ok(c) => c,
                 Err(e) => {
                     win.set_invoice_status(format!("Chyba DB: {}", e).as_str().into());
@@ -608,6 +652,7 @@ fn main() {
         let hist_model = history_model.clone();
         let items_ref = items_model.clone();
         let editing_id = editing_invoice_id.clone();
+        let p = paths_state.clone();
 
         window.on_delete_invoice(move |id| {
             let win = match weak.upgrade() {
@@ -615,7 +660,7 @@ fn main() {
                 None => return,
             };
 
-            let conn = match Connection::open("faktury.db") {
+            let conn = match open_db(&p) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Cannot open DB: {}", e);
@@ -650,19 +695,28 @@ fn main() {
     // ── Callback: regenerate PDF from history ───────────────────────────
     {
         let weak = window.as_weak();
+        let cfg_ref = config_state.clone();
+        let p = paths_state.clone();
+
         window.on_regenerate_pdf(move |id| {
-            let conn = Connection::open("faktury.db").unwrap();
-            let supplier = db::load_supplier(&conn)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            let conn = match open_db(&p) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Cannot open DB: {}", e);
+                    return;
+                }
+            };
+
+            let cfg = cfg_ref.borrow().clone();
+            let supplier = cfg.to_supplier();
 
             match db::load_invoice_detail(&conn, id as i64) {
                 Ok((invoice, customer, items)) => {
                     let template_data =
                         TemplateData::from_parts(&invoice, &supplier, &customer, &items);
-                    let output_path = pdf::pdf_output_path(&invoice.number);
-                    match pdf::compile(&template_data, &output_path) {
+                    let output_dir = Path::new(&cfg.output_dir);
+                    let output_path = pdf::pdf_output_path(output_dir, &invoice.number);
+                    match pdf::compile(&template_data, &p.templates_dir(), &cfg.template, &output_path) {
                         Ok(_) => pdf::open(&output_path),
                         Err(e) => eprintln!("PDF regeneration error: {}", e),
                     }

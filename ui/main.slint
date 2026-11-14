@@ -347,6 +347,9 @@ export component AppWindow inherits Window {
     in-out property <string> sup-account;
     in-out property <string> sup-iban;
     in-out property <int>    sup-due-days: 14;
+    in-out property <[string]> available-templates: ["klasicka.typ", "moderni.typ"];
+    in-out property <string>   sup-template: "klasicka.typ";
+    in-out property <string>   sup-output-dir: "";
 
     // ── Customer fields ───────────────────────────────────────────────────
     in-out property <string> cust-reg-id;
@@ -912,6 +915,35 @@ export component AppWindow inherits Window {
                                         value <=> sup-due-days;
                                         minimum: 1;
                                         maximum: 365;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Card {
+                        title: "Předvolby PDF a šablony";
+
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 10px;
+
+                            GridBox {
+                                spacing: 6px;
+                                Row {
+                                    Text { text: "Šablona faktury:"; vertical-alignment: center; color: #d1d5db; }
+                                    ComboBox {
+                                        model: available-templates;
+                                        current-value <=> sup-template;
+                                        colspan: 3;
+                                    }
+                                }
+                                Row {
+                                    Text { text: "Složka pro PDF:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit {
+                                        text <=> sup-output-dir;
+                                        placeholder-text: "Cesta ke složce pro ukládání PDF";
+                                        colspan: 3;
                                     }
                                 }
                             }
