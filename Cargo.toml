@@ -19,3 +19,10 @@ toml = "0.8"
 
 [build-dependencies]
 slint-build = "1.9"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "z"
+panic = "abort"

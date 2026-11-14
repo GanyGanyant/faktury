@@ -21,27 +21,37 @@ fn default_due_days() -> u32 {
 // Path resolver
 // ---------------------------------------------------------------------------
 
+/// Standardized filesystem locations for application configuration, data, and PDFs.
 #[derive(Debug, Clone)]
 pub struct AppPaths {
+    /// Directory for configuration and templates (`~/.config/faktury` on Linux).
     pub config_dir: PathBuf,
+    /// Directory for application data like SQLite database (`~/.local/share/faktury` on Linux).
     pub data_dir: PathBuf,
+    /// Default output folder for exported PDF invoices (user's `Documents/Faktury`).
     pub default_output_dir: PathBuf,
 }
 
 impl AppPaths {
+    /// Returns the absolute path to `config.toml`.
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }
 
+    /// Returns the absolute path to the templates directory.
     pub fn templates_dir(&self) -> PathBuf {
         self.config_dir.join("templates")
     }
 
+    /// Returns the absolute path to `faktury.db`.
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("faktury.db")
     }
 }
 
+/// Resolves standard OS-compliant directories for configuration and persistent data.
+///
+/// Uses `directories::ProjectDirs` and `directories::UserDirs`.
 pub fn resolve_paths() -> AppPaths {
     let (config_dir, data_dir) = if let Some(proj) = ProjectDirs::from("", "", "faktury") {
         (proj.config_dir().to_path_buf(), proj.data_dir().to_path_buf())
@@ -60,6 +70,7 @@ pub fn resolve_paths() -> AppPaths {
     }
 }
 
+/// Creates required configuration, template, and data directories if missing.
 pub fn ensure_dirs(paths: &AppPaths) -> Result<(), String> {
     std::fs::create_dir_all(&paths.config_dir)
         .map_err(|e| format!("Failed to create config dir {}: {}", paths.config_dir.display(), e))?;
@@ -74,28 +85,40 @@ pub fn ensure_dirs(paths: &AppPaths) -> Result<(), String> {
 // Configuration model
 // ---------------------------------------------------------------------------
 
+/// Persistent user settings stored in `config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// Supplier company or trade name.
     #[serde(default)]
     pub name: String,
+    /// Supplier business registration number (IČO).
     #[serde(default, alias = "reg_id")]
     pub ico: String,
+    /// Supplier VAT identification number (DIČ).
     #[serde(default, alias = "vat_id")]
     pub dic: String,
+    /// Supplier street address.
     #[serde(default)]
     pub street: String,
+    /// Supplier postal code.
     #[serde(default)]
     pub zip: String,
+    /// Supplier city / municipality.
     #[serde(default)]
     pub city: String,
+    /// Supplier bank account number (CZ format).
     #[serde(default, alias = "account_cz")]
     pub bank_account: String,
+    /// Supplier IBAN.
     #[serde(default)]
     pub iban: String,
+    /// Default payment due duration in days.
     #[serde(default = "default_due_days")]
     pub default_due_days: u32,
+    /// Currently selected Typst template file name (e.g., "klasicka.typ").
     #[serde(default = "default_template")]
     pub template: String,
+    /// Destination folder for saving exported invoice PDFs.
     #[serde(default)]
     pub output_dir: String,
 }
@@ -119,6 +142,7 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// Converts configuration into a `Supplier` domain model.
     pub fn to_supplier(&self) -> Supplier {
         Supplier {
             name: self.name.clone(),
@@ -133,6 +157,7 @@ impl AppConfig {
         }
     }
 
+    /// Updates internal supplier fields from a `Supplier` domain model.
     pub fn update_supplier_fields(&mut self, s: &Supplier) {
         self.name = s.name.clone();
         self.ico = s.reg_id.clone();
@@ -150,6 +175,9 @@ impl AppConfig {
 // Template management
 // ---------------------------------------------------------------------------
 
+/// Seeds default built-in templates (`klasicka.typ` and `moderni.typ`) if not present on disk.
+///
+/// Existing user modifications are never overwritten.
 pub fn ensure_default_templates(paths: &AppPaths) {
     let tdir = paths.templates_dir();
     let _ = std::fs::create_dir_all(&tdir);
@@ -165,6 +193,7 @@ pub fn ensure_default_templates(paths: &AppPaths) {
     }
 }
 
+/// Scans the templates directory for all `*.typ` files and returns their sorted names.
 pub fn list_templates(paths: &AppPaths) -> Vec<String> {
     let tdir = paths.templates_dir();
     let mut templates = Vec::new();
@@ -195,6 +224,7 @@ pub fn list_templates(paths: &AppPaths) -> Vec<String> {
 // Persistence & Migration
 // ---------------------------------------------------------------------------
 
+/// Copies legacy `faktury.db` from the current working directory into `data_dir` if needed.
 pub fn migrate_legacy_db_if_needed(paths: &AppPaths) {
     let target = paths.db_path();
     let legacy = Path::new("faktury.db");
@@ -238,6 +268,7 @@ fn load_legacy_supplier(conn: &Connection) -> rusqlite::Result<Option<Supplier>>
     }
 }
 
+/// Loads configuration from `config.toml`, migrating legacy database settings if missing.
 pub fn load_or_init(paths: &AppPaths) -> Result<AppConfig, String> {
     ensure_dirs(paths)?;
     let config_file = paths.config_file();
@@ -281,6 +312,7 @@ pub fn load_or_init(paths: &AppPaths) -> Result<AppConfig, String> {
     Ok(config)
 }
 
+/// Serializes and writes `config` to `config.toml` via `toml::to_string_pretty`.
 pub fn save_config(paths: &AppPaths, config: &AppConfig) -> Result<(), String> {
     let config_file = paths.config_file();
     if let Some(parent) = config_file.parent() {

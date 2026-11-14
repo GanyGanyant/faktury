@@ -6,6 +6,9 @@ use crate::models::{Customer, Invoice, LineItem};
 // Schema initialisation
 // ---------------------------------------------------------------------------
 
+/// Initialises the SQLite database schema if the required tables do not already exist.
+///
+/// Creates `invoices`, `line_items`, and `customers` tables.
 pub fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS invoices (
@@ -54,6 +57,9 @@ pub fn init(conn: &Connection) -> Result<()> {
 // Customers
 // ---------------------------------------------------------------------------
 
+/// Inserts or updates a customer in the `customers` directory table.
+///
+/// If `c.reg_id` (IČO) is empty or whitespace, the operation is skipped as a no-op.
 pub fn save_customer(conn: &Connection, c: &Customer) -> Result<()> {
     if c.reg_id.trim().is_empty() {
         return Ok(());
@@ -79,6 +85,7 @@ pub fn save_customer(conn: &Connection, c: &Customer) -> Result<()> {
     Ok(())
 }
 
+/// Retrieves all saved customers ordered alphabetically by name (case-insensitive).
 pub fn list_customers(conn: &Connection) -> Result<Vec<Customer>> {
     let mut stmt = conn.prepare(
         "SELECT ico, name, dic, street, zip, city
@@ -102,11 +109,11 @@ pub fn list_customers(conn: &Connection) -> Result<Vec<Customer>> {
     Ok(customers)
 }
 
+/// Deletes a customer from the `customers` table by registration ID (IČO).
 pub fn delete_customer(conn: &Connection, ico: &str) -> Result<()> {
     conn.execute("DELETE FROM customers WHERE ico = ?1", params![ico])?;
     Ok(())
 }
-
 
 // ---------------------------------------------------------------------------
 // Invoice numbering
@@ -131,13 +138,13 @@ fn max_invoice_seq_for_year(conn: &Connection, year: i32) -> Result<i64> {
     Ok(max_seq)
 }
 
-/// Returns the next invoice number in `NNNN/YYYY` format.
+/// Returns the next sequential invoice number for a given calendar year in `NNNN/YYYY` format.
 pub fn next_invoice_number(conn: &Connection, year: i32) -> Result<String> {
     let n = max_invoice_seq_for_year(conn, year)?;
     Ok(format!("{:04}/{}", n + 1, year))
 }
 
-/// Returns the next variable symbol (invoice number without slash).
+/// Returns the next variable symbol matching the invoice sequence without slashes (`NNNNYYYY`).
 pub fn next_variable_symbol(conn: &Connection, year: i32) -> Result<String> {
     let n = max_invoice_seq_for_year(conn, year)?;
     Ok(format!("{:04}{}", n + 1, year))
@@ -147,6 +154,9 @@ pub fn next_variable_symbol(conn: &Connection, year: i32) -> Result<String> {
 // Invoice persistence
 // ---------------------------------------------------------------------------
 
+/// Inserts a newly created invoice and its associated line items into SQLite.
+///
+/// Returns the generated SQLite row ID of the inserted invoice.
 pub fn save_invoice(
     conn: &Connection,
     inv: &Invoice,
@@ -186,6 +196,7 @@ pub fn save_invoice(
     Ok(invoice_id)
 }
 
+/// Updates an existing invoice record and replaces its line items.
 pub fn update_invoice(
     conn: &Connection,
     id: i64,
@@ -241,6 +252,9 @@ pub fn update_invoice(
     Ok(())
 }
 
+/// Deletes an invoice and its line items by database ID.
+///
+/// Returns the recorded PDF file path if one was associated with the invoice.
 pub fn delete_invoice(conn: &Connection, id: i64) -> Result<Option<String>> {
     let pdf_path: Option<String> = conn
         .query_row(
@@ -256,6 +270,7 @@ pub fn delete_invoice(conn: &Connection, id: i64) -> Result<Option<String>> {
     Ok(pdf_path)
 }
 
+/// Updates the persisted PDF file path for an invoice.
 pub fn set_invoice_pdf_path(conn: &Connection, id: i64, path: &str) -> Result<()> {
     conn.execute(
         "UPDATE invoices SET pdf_path = ?1 WHERE id = ?2",
@@ -268,6 +283,7 @@ pub fn set_invoice_pdf_path(conn: &Connection, id: i64, path: &str) -> Result<()
 // Invoice queries
 // ---------------------------------------------------------------------------
 
+/// Retrieves a list of all invoices ordered descending by ID (most recent first).
 pub fn list_invoices(conn: &Connection) -> Result<Vec<Invoice>> {
     let mut stmt = conn.prepare(
         "SELECT id, number, variable_symbol, issue_date, due_date,
@@ -296,6 +312,7 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<Invoice>> {
     .collect()
 }
 
+/// Loads full invoice details including associated customer data and item rows.
 pub fn load_invoice_detail(
     conn: &Connection,
     id: i64,

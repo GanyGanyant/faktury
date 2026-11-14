@@ -3,11 +3,17 @@ use serde::Deserialize;
 /// Data returned by the ARES business registry API.
 #[derive(Debug, Clone)]
 pub struct AresResult {
+    /// Company or trade name.
     pub name: String,
+    /// Business registration number (IČO).
     pub reg_id: String,
+    /// VAT identification number (DIČ).
     pub vat_id: String,
+    /// Street address.
     pub street: String,
+    /// Postal code (ZIP).
     pub zip: String,
+    /// City / municipality.
     pub city: String,
 }
 
