@@ -93,7 +93,6 @@
     inset: (left: 10pt, y: 4pt),
     width: 100%
   )[
-    #text(size: 8.5pt, weight: "bold", fill: rgb("#4B5563"))[Poznámka:] \
     #data.note
   ]
   #v(1.2em)

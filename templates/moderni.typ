@@ -141,7 +141,6 @@
     radius: (right: 4pt),
     width: 100%
   )[
-    #text(size: 8.5pt, weight: "bold", fill: rgb("#475569"))[Poznámka:] \
     #data.note
   ]
   #v(0.6em)
