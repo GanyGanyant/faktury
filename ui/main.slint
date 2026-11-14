@@ -2,6 +2,286 @@ import { TabWidget, Button, LineEdit, TextEdit, ComboBox,
          SpinBox, ScrollView, VerticalBox, HorizontalBox,
          GridBox, GroupBox } from "std-widgets.slint";
 
+component Card inherits Rectangle {
+    in-out property <string> title;
+    in-out property <string> badge-text: "";
+    in-out property <color>  badge-bg: #f59e0b25;
+    in-out property <color>  badge-color: #fbbf24;
+    in-out property <color>  badge-border: #f59e0b50;
+    background: #1f1f23;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #2f2f35;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        if root.title != "" || root.badge-text != "": HorizontalLayout {
+            alignment: space-between;
+            if root.title != "": Text {
+                text: root.title;
+                font-size: 14px;
+                font-weight: 700;
+                color: #f3f4f6;
+                vertical-alignment: center;
+            }
+            if root.badge-text != "": Rectangle {
+                background: root.badge-bg;
+                border-color: root.badge-border;
+                border-width: 1px;
+                border-radius: 12px;
+                height: 22px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    alignment: center;
+                    Text {
+                        text: root.badge-text;
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: root.badge-color;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        @children
+    }
+}
+
+component PrimaryButton inherits Rectangle {
+    in-out property <string> text;
+    in-out property <bool> enabled: true;
+    callback clicked();
+
+    background: !root.enabled ? #1e3a8a : touch.has-hover ? #1d4ed8 : #2563eb;
+    border-radius: 6px;
+    height: 36px;
+    vertical-stretch: 0;
+
+    touch := TouchArea {
+        enabled <=> root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: center;
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component SecondaryButton inherits Rectangle {
+    in-out property <string> text;
+    in-out property <bool> enabled: true;
+    callback clicked();
+
+    background: !root.enabled ? #18181b : touch.has-hover ? #27272a : #1f1f23;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #3f3f46;
+    height: 36px;
+    vertical-stretch: 0;
+
+    touch := TouchArea {
+        enabled <=> root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        alignment: center;
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: 500;
+            color: #f3f4f6;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component IconButton inherits Rectangle {
+    in-out property <string> icon-text: "📅";
+    callback clicked();
+
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    background: touch.has-hover ? #3f3f46 : #27272a;
+    border-width: 1px;
+    border-color: #3f3f46;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.icon-text;
+        font-size: 15px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Calendar data structures and components
+// ---------------------------------------------------------------------------
+
+struct CalendarDay {
+    day-text: string,
+    date-str: string,
+    in-month: bool,
+    is-today: bool,
+    is-selected: bool,
+}
+
+struct CalendarWeek {
+    d0: CalendarDay,
+    d1: CalendarDay,
+    d2: CalendarDay,
+    d3: CalendarDay,
+    d4: CalendarDay,
+    d5: CalendarDay,
+    d6: CalendarDay,
+}
+
+component DayCell inherits Rectangle {
+    in-out property <CalendarDay> day;
+    callback clicked(string);
+
+    height: 28px;
+    horizontal-stretch: 1;
+    border-radius: 4px;
+    background: touch.has-hover ? #dbeafe :
+                day.is-selected ? #2563eb :
+                day.is-today ? #eff6ff :
+                #ffffff;
+    border-width: day.is-today && !day.is-selected ? 1px : 0px;
+    border-color: #3b82f6;
+
+    touch := TouchArea {
+        clicked => {
+            if (root.day.date-str != "") {
+                root.clicked(root.day.date-str);
+            }
+        }
+    }
+
+    Text {
+        text: root.day.day-text;
+        font-size: 11px;
+        font-weight: root.day.is-selected || root.day.is-today ? 600 : 400;
+        color: root.day.is-selected ? #ffffff :
+               !root.day.in-month ? #9ca3af :
+               #1f2937;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component CalendarPopup inherits PopupWindow {
+    close-policy: close-on-click-outside;
+    width: 260px;
+    height: 270px;
+
+    in-out property <string> title: "";
+    in-out property <[CalendarWeek]> weeks: [];
+    callback prev-month();
+    callback next-month();
+    callback select-day(string);
+
+    Rectangle {
+        background: #ffffff;
+        border-color: #d1d5db;
+        border-width: 1px;
+        border-radius: 8px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000025;
+        drop-shadow-offset-y: 4px;
+
+        VerticalBox {
+            padding: 8px;
+            spacing: 6px;
+
+            // Month navigation header
+            HorizontalLayout {
+                spacing: 4px;
+                alignment: space-between;
+
+                Button {
+                    text: "<";
+                    width: 32px;
+                    clicked => { root.prev-month(); }
+                }
+
+                Text {
+                    text: root.title;
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: #111827;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    text: ">";
+                    width: 32px;
+                    clicked => { root.next-month(); }
+                }
+            }
+
+            // Day-of-week header (Mon - Sun)
+            HorizontalLayout {
+                spacing: 2px;
+                for day-name in ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]: Text {
+                    text: day-name;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #6b7280;
+                    horizontal-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: #e5e7eb;
+            }
+
+            // 6 rows of 7 days
+            VerticalBox {
+                padding: 0px;
+                spacing: 2px;
+
+                for week in root.weeks: HorizontalLayout {
+                    spacing: 2px;
+                    DayCell { day: week.d0; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d1; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d2; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d3; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d4; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d5; clicked(d) => { root.select-day(d); } }
+                    DayCell { day: week.d6; clicked(d) => { root.select-day(d); } }
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Data structures shared between Rust and Slint
 // ---------------------------------------------------------------------------
@@ -32,9 +312,18 @@ export component AppWindow inherits Window {
     title: "Fakturace";
     min-width: 940px;
     min-height: 700px;
+    background: #121214;
 
     // ── Callbacks ──────────────────────────────────────────────────────────
     callback fetch-ares(string);        // lookup customer by IČO
+    callback save-customer();           // manually save customer to customers table
+    callback select-saved-customer(int);// select customer from dropdown
+    callback delete-saved-customer(int);// delete customer from dropdown
+    callback issue-date-edited(string); // auto-update due date
+    callback open-calendar(string, string); // (target: "issue"|"due", current_date_str)
+    callback prev-calendar-month();
+    callback next-calendar-month();
+    callback select-calendar-day(string);
     callback add-line-item();
     callback remove-line-item(int);
     callback recalculate-totals();
@@ -66,6 +355,8 @@ export component AppWindow inherits Window {
     in-out property <string> cust-street;
     in-out property <string> cust-zip;
     in-out property <string> cust-city;
+    in-out property <[string]> saved-customers: ["-- Vyberte odběratele --"];
+    in-out property <int> selected-customer-index: 0;
 
     // ── Invoice metadata ──────────────────────────────────────────────────
     in-out property <string> inv-number;
@@ -74,6 +365,11 @@ export component AppWindow inherits Window {
     in-out property <string> inv-due-date;
     in-out property <string> inv-payment-method: "Převodem";
     in-out property <string> inv-note;
+    in-out property <bool>   is-editing: false;
+
+    // ── Calendar popup state ──────────────────────────────────────────────
+    in-out property <string> calendar-title: "";
+    in-out property <[CalendarWeek]> calendar-weeks: [];
 
     // ── Totals (computed by Rust on item changes) ─────────────────────────
     in-out property <string> inv-total-excl-vat: "0,00";
@@ -82,6 +378,7 @@ export component AppWindow inherits Window {
 
     // ── Status messages ───────────────────────────────────────────────────
     in-out property <string> ares-status;
+    in-out property <bool>   ares-status-is-error: true;
     in-out property <string> invoice-status;
     in-out property <string> supplier-status;
 
@@ -102,192 +399,379 @@ export component AppWindow inherits Window {
         Tab {
             title: "Nová faktura";
 
-            ScrollView {
-                VerticalBox {
-                    padding: 12px;
-                    spacing: 10px;
+            VerticalLayout {
+                padding: 0px;
+                spacing: 0px;
 
-                    // ── Customer ─────────────────────────────────────────
-                    GroupBox {
-                        title: "Odběratel";
-                        VerticalBox {
-                            spacing: 6px;
+                ScrollView {
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 12px;
 
-                            HorizontalBox {
-                                spacing: 8px;
+                        // ── Top side-by-side cards (Odběratel & Faktura) ──
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: stretch;
+
+                            // ── Customer Card (~55% width) ──
+                            Card {
+                                title: "Odběratel";
+                                horizontal-stretch: 55;
+
+                                VerticalLayout {
+                                    spacing: 10px;
+
+                                    // Preset selection header
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text {
+                                            text: "Uložený odběratel:";
+                                            vertical-alignment: center;
+                                            color: #d1d5db;
+                                        }
+                                        ComboBox {
+                                            horizontal-stretch: 1;
+                                            model: saved-customers;
+                                            current-index <=> selected-customer-index;
+                                            selected(v) => {
+                                                select-saved-customer(self.current-index);
+                                            }
+                                        }
+                                        Button {
+                                            text: "Smazat";
+                                            height: 32px;
+                                            enabled: selected-customer-index > 0;
+                                            clicked => {
+                                                delete-saved-customer(selected-customer-index);
+                                            }
+                                        }
+                                    }
+
+                                    // Divider below preset header
+                                    Rectangle {
+                                        height: 1px;
+                                        background: #2f2f35;
+                                    }
+
+                                    // Aligned form grid
+                                    VerticalLayout {
+                                        spacing: 8px;
+
+                                        // Row 1: IČO & Actions
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            Text { text: "IČO:"; width: 55px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit {
+                                                placeholder-text: "IČO";
+                                                text <=> cust-reg-id;
+                                                width: 130px;
+                                            }
+                                            Button {
+                                                text: "Načíst z ARES";
+                                                clicked => { fetch-ares(cust-reg-id); }
+                                            }
+                                            Button {
+                                                text: "Uložit firmu";
+                                                clicked => { save-customer(); }
+                                            }
+                                            Text {
+                                                text: ares-status;
+                                                color: ares-status-is-error ? #f87171 : #4ade80;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // Row 2: Name
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            Text { text: "Název:"; width: 55px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit { text <=> cust-name; horizontal-stretch: 1; }
+                                        }
+
+                                        // Row 3: DIČ & Street
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            Text { text: "DIČ:"; width: 55px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit { text <=> cust-vat-id; width: 130px; }
+                                            Text { text: "Ulice:"; width: 48px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit { text <=> cust-street; horizontal-stretch: 1; }
+                                        }
+
+                                        // Row 4: ZIP & City
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            Text { text: "PSČ:"; width: 55px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit { text <=> cust-zip; width: 130px; }
+                                            Text { text: "Město:"; width: 48px; vertical-alignment: center; color: #d1d5db; }
+                                            LineEdit { text <=> cust-city; horizontal-stretch: 1; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── Invoice Metadata Card (~45% width) ──
+                            Card {
+                                title: "Faktura";
+                                horizontal-stretch: 45;
+                                badge-text: is-editing ? "✏️ Režim úprav" : invoice-status;
+                                badge-bg: is-editing ? #f59e0b25 : (invoice-status != "" ? #22c55e20 : #00000000);
+                                badge-color: is-editing ? #fbbf24 : (invoice-status != "" ? #4ade80 : #00000000);
+                                badge-border: is-editing ? #f59e0b50 : (invoice-status != "" ? #22c55e50 : #00000000);
+
+                                VerticalLayout {
+                                    spacing: 8px;
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text { text: "Číslo faktury:"; width: 115px; vertical-alignment: center; color: #d1d5db; }
+                                        LineEdit { text <=> inv-number; width: 160px; }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text { text: "Var. symbol:"; width: 115px; vertical-alignment: center; color: #d1d5db; }
+                                        LineEdit { text <=> inv-variable-symbol; width: 160px; }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text { text: "Datum vystavení:"; width: 115px; vertical-alignment: center; color: #d1d5db; }
+                                        HorizontalLayout {
+                                            width: 160px;
+                                            spacing: 4px;
+                                            alignment: start;
+                                            LineEdit {
+                                                text <=> inv-issue-date;
+                                                width: 122px;
+                                                edited(v) => { issue-date-edited(v); }
+                                            }
+                                            issue_btn := IconButton {
+                                                icon-text: "📅";
+                                                clicked => {
+                                                    open-calendar("issue", inv-issue-date);
+                                                    issue_cal.show();
+                                                }
+                                            }
+                                            issue_cal := CalendarPopup {
+                                                x: -100px;
+                                                y: parent.height + 4px;
+                                                title: calendar-title;
+                                                weeks: calendar-weeks;
+                                                prev-month => { prev-calendar-month(); }
+                                                next-month => { next-calendar-month(); }
+                                                select-day(d) => {
+                                                    select-calendar-day(d);
+                                                    issue_cal.close();
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text { text: "Datum splatnosti:"; width: 115px; vertical-alignment: center; color: #d1d5db; }
+                                        HorizontalLayout {
+                                            width: 160px;
+                                            spacing: 4px;
+                                            alignment: start;
+                                            LineEdit {
+                                                text <=> inv-due-date;
+                                                width: 122px;
+                                            }
+                                            due_btn := IconButton {
+                                                icon-text: "📅";
+                                                clicked => {
+                                                    open-calendar("due", inv-due-date);
+                                                    due_cal.show();
+                                                }
+                                            }
+                                            due_cal := CalendarPopup {
+                                                x: -100px;
+                                                y: parent.height + 4px;
+                                                title: calendar-title;
+                                                weeks: calendar-weeks;
+                                                prev-month => { prev-calendar-month(); }
+                                                next-month => { next-calendar-month(); }
+                                                select-day(d) => {
+                                                    select-calendar-day(d);
+                                                    due_cal.close();
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text { text: "Forma úhrady:"; width: 115px; vertical-alignment: center; color: #d1d5db; }
+                                        LineEdit { text <=> inv-payment-method; width: 160px; }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Line Items Card ──
+                        Card {
+                            title: "Položky";
+
+                            VerticalLayout {
+                                spacing: 6px;
+
+                                // Header row
+                                HorizontalBox {
+                                    spacing: 4px;
+                                    padding-left: 0px;
+                                    padding-right: 0px;
+                                    Text { text: "Popis";     font-weight: 600; horizontal-stretch: 3; color: #9ca3af; }
+                                    Text { text: "Množství";  font-weight: 600; horizontal-stretch: 1; color: #9ca3af; }
+                                    Text { text: "Jed.";      font-weight: 600; horizontal-stretch: 1; color: #9ca3af; }
+                                    Text { text: "Cena/ks";   font-weight: 600; horizontal-stretch: 1; color: #9ca3af; }
+                                    Text { text: "DPH %";     font-weight: 600; horizontal-stretch: 1; color: #9ca3af; }
+                                    Rectangle { width: 36px; }
+                                }
+
+                                // Item rows
+                                for item[idx] in line-items: HorizontalBox {
+                                    spacing: 4px;
+                                    padding-left: 0px;
+                                    padding-right: 0px;
+                                    LineEdit {
+                                        text: item.description;
+                                        placeholder-text: "Popis položky";
+                                        horizontal-stretch: 3;
+                                        edited(v) => { line-items[idx].description = v; }
+                                    }
+                                    LineEdit {
+                                        text: item.quantity;
+                                        horizontal-stretch: 1;
+                                        edited(v) => {
+                                            line-items[idx].quantity = v.to-float();
+                                            recalculate-totals();
+                                        }
+                                    }
+                                    LineEdit {
+                                        text: item.unit;
+                                        horizontal-stretch: 1;
+                                        edited(v) => { line-items[idx].unit = v; }
+                                    }
+                                    LineEdit {
+                                        text: item.unit-price;
+                                        horizontal-stretch: 1;
+                                        edited(v) => {
+                                            line-items[idx].unit-price = v.to-float();
+                                            recalculate-totals();
+                                        }
+                                    }
+                                    ComboBox {
+                                        model: ["0 %", "12 %", "21 %"];
+                                        current-index: item.vat-rate == 21 ? 2
+                                                     : item.vat-rate == 12 ? 1 : 0;
+                                        horizontal-stretch: 1;
+                                        selected(v) => {
+                                            line-items[idx].vat-rate =
+                                                v == "21 %" ? 21 :
+                                                v == "12 %" ? 12 : 0;
+                                            recalculate-totals();
+                                        }
+                                    }
+                                    Button {
+                                        text: "−";
+                                        width: 36px;
+                                        clicked => { remove-line-item(idx); }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Button {
+                                        text: "+ Přidat položku";
+                                        clicked => { add-line-item(); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Note / Comment Card ──
+                        Card {
+                            title: "Poznámka";
+
+                            TextEdit {
+                                text <=> inv-note;
+                                min-height: 64px;
+                            }
+                        }
+                    }
+                }
+
+                // Top border for pinned bottom bar
+                Rectangle {
+                    height: 1px;
+                    background: #2f2f35;
+                }
+
+                // ── Pinned Bottom Action Bar ──
+                Rectangle {
+                    background: #18181b;
+                    height: 60px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        padding-left: 16px;
+                        padding-right: 16px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+
+                            // Left: action buttons
+                            HorizontalLayout {
+                                spacing: 12px;
                                 alignment: start;
-                                LineEdit {
-                                    placeholder-text: "IČO odběratele";
-                                    text <=> cust-reg-id;
-                                    width: 160px;
+
+                                PrimaryButton {
+                                    text: "💾  Uložit a generovat PDF";
+                                    clicked => { save-invoice(); }
                                 }
-                                Button {
-                                    text: "Načíst z ARES";
-                                    clicked => { fetch-ares(cust-reg-id); }
-                                }
-                                Text {
-                                    text: ares-status;
-                                    color: #c0392b;
-                                    vertical-alignment: center;
+
+                                SecondaryButton {
+                                    text: "📄  Nová prázdná faktura";
+                                    clicked => { new-empty-invoice(); }
                                 }
                             }
 
-                            GridBox {
-                                spacing: 4px;
-                                Row {
-                                    Text { text: "Název:"; vertical-alignment: center; }
-                                    LineEdit { text <=> cust-name; colspan: 3; }
-                                }
-                                Row {
-                                    Text { text: "DIČ:"; vertical-alignment: center; }
-                                    LineEdit { text <=> cust-vat-id; }
-                                    Text { text: "Ulice:"; vertical-alignment: center; }
-                                    LineEdit { text <=> cust-street; }
-                                }
-                                Row {
-                                    Text { text: "PSČ:"; vertical-alignment: center; }
-                                    LineEdit { text <=> cust-zip; width: 80px; }
-                                    Text { text: "Město:"; vertical-alignment: center; }
-                                    LineEdit { text <=> cust-city; }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Invoice metadata ──────────────────────────────────
-                    GroupBox {
-                        title: "Faktura";
-                        GridBox {
-                            spacing: 4px;
-                            Row {
-                                Text { text: "Číslo faktury:"; vertical-alignment: center; }
-                                LineEdit { text <=> inv-number; width: 120px; }
-                                Text { text: "Var. symbol:"; vertical-alignment: center; }
-                                LineEdit { text <=> inv-variable-symbol; width: 120px; }
-                            }
-                            Row {
-                                Text { text: "Datum vystavení:"; vertical-alignment: center; }
-                                LineEdit { text <=> inv-issue-date; width: 120px; }
-                                Text { text: "Datum splatnosti:"; vertical-alignment: center; }
-                                LineEdit { text <=> inv-due-date; width: 120px; }
-                            }
-                            Row {
-                                Text { text: "Forma úhrady:"; vertical-alignment: center; }
-                                LineEdit { text <=> inv-payment-method; colspan: 3; }
-                            }
-                        }
-                    }
-
-                    // ── Line items ────────────────────────────────────────
-                    GroupBox {
-                        title: "Položky";
-                        VerticalBox {
-                            spacing: 4px;
-
-                            // Header row
-                            HorizontalBox {
-                                spacing: 4px;
-                                Text { text: "Popis";     font-weight: 600; horizontal-stretch: 3; }
-                                Text { text: "Množství";  font-weight: 600; horizontal-stretch: 1; }
-                                Text { text: "Jed.";      font-weight: 600; horizontal-stretch: 1; }
-                                Text { text: "Cena/ks";   font-weight: 600; horizontal-stretch: 1; }
-                                Text { text: "DPH %";     font-weight: 600; horizontal-stretch: 1; }
-                                Rectangle { width: 36px; }
-                            }
-
-                            // Item rows (driven by the line-items model)
-                            for item[idx] in line-items: HorizontalBox {
-                                spacing: 4px;
-                                LineEdit {
-                                    text: item.description;
-                                    placeholder-text: "Popis položky";
-                                    horizontal-stretch: 3;
-                                    edited(v) => { line-items[idx].description = v; }
-                                }
-                                LineEdit {
-                                    text: item.quantity;
-                                    horizontal-stretch: 1;
-                                    edited(v) => {
-                                        line-items[idx].quantity = v.to-float();
-                                        recalculate-totals();
-                                    }
-                                }
-                                LineEdit {
-                                    text: item.unit;
-                                    horizontal-stretch: 1;
-                                    edited(v) => { line-items[idx].unit = v; }
-                                }
-                                LineEdit {
-                                    text: item.unit-price;
-                                    horizontal-stretch: 1;
-                                    edited(v) => {
-                                        line-items[idx].unit-price = v.to-float();
-                                        recalculate-totals();
-                                    }
-                                }
-                                ComboBox {
-                                    model: ["0 %", "12 %", "21 %"];
-                                    current-index: item.vat-rate == 21 ? 2
-                                                 : item.vat-rate == 12 ? 1 : 0;
-                                    horizontal-stretch: 1;
-                                    selected(v) => {
-                                        line-items[idx].vat-rate =
-                                            v == "21 %" ? 21 :
-                                            v == "12 %" ? 12 : 0;
-                                        recalculate-totals();
-                                    }
-                                }
-                                Button {
-                                    text: "−";
-                                    width: 36px;
-                                    clicked => { remove-line-item(idx); }
-                                }
-                            }
-
-                            Button {
-                                text: "+ Přidat položku";
-                                clicked => { add-line-item(); }
-                            }
-
-                            // Totals summary
-                            HorizontalBox {
+                            // Right: live totals
+                            HorizontalLayout {
+                                spacing: 20px;
                                 alignment: end;
-                                spacing: 24px;
-                                Text { text: "Základ: " + inv-total-excl-vat + " Kč"; }
-                                Text { text: "DPH: "    + inv-total-vat      + " Kč"; }
+
                                 Text {
-                                    text: "Celkem: " + inv-total-incl-vat + " Kč";
-                                    font-weight: 700;
+                                    text: "Základ: " + inv-total-excl-vat + " Kč";
+                                    vertical-alignment: center;
+                                    color: #9ca3af;
                                     font-size: 13px;
                                 }
+                                Text {
+                                    text: "DPH: " + inv-total-vat + " Kč";
+                                    vertical-alignment: center;
+                                    color: #9ca3af;
+                                    font-size: 13px;
+                                }
+                                Text {
+                                    text: "Celkem: " + inv-total-incl-vat + " Kč";
+                                    vertical-alignment: center;
+                                    color: #ffffff;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                }
                             }
-                        }
-                    }
-
-                    // ── Note / Comment ────────────────────────────────────
-                    GroupBox {
-                        title: "Poznámka";
-                        TextEdit {
-                            text <=> inv-note;
-                            min-height: 72px;
-                        }
-                    }
-
-                    // ── Actions ───────────────────────────────────────────
-                    HorizontalBox {
-                        spacing: 12px;
-                        alignment: start;
-                        Button {
-                            text: "💾  Uložit a generovat PDF";
-                            clicked => { save-invoice(); }
-                        }
-                        Button {
-                            text: "📄  Nová prázdná faktura";
-                            clicked => { new-empty-invoice(); }
-                        }
-                        Text {
-                            text: invoice-status;
-                            vertical-alignment: center;
                         }
                     }
                 }
@@ -300,58 +784,71 @@ export component AppWindow inherits Window {
         Tab {
             title: "Historie faktur";
 
-            VerticalBox {
-                padding: 12px;
-                spacing: 8px;
+            VerticalLayout {
+                padding: 14px;
+                vertical-stretch: 1;
 
-                // Table header with aligned columns
-                HorizontalLayout {
-                    spacing: 8px;
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    Text { text: "Číslo";     font-weight: 600; horizontal-stretch: 1; }
-                    Text { text: "Odběratel"; font-weight: 600; horizontal-stretch: 3; }
-                    Text { text: "Vystaveno"; font-weight: 600; horizontal-stretch: 1; }
-                    Text { text: "Celkem";    font-weight: 600; horizontal-stretch: 1; }
-                    Text { text: "Akce";      font-weight: 600; width: 220px; horizontal-alignment: center; }
-                }
+                Card {
+                    title: "Vystavené faktury";
+                    vertical-stretch: 1;
 
-                Rectangle {
-                    height: 1px;
-                    background: #d1d5db;
-                }
+                    VerticalLayout {
+                        spacing: 8px;
+                        vertical-stretch: 1;
 
-                // History rows
-                ScrollView {
-                    VerticalBox {
-                        padding: 0px;
-                        spacing: 4px;
-
-                        for row in history: HorizontalLayout {
+                        // Table header with aligned columns
+                        HorizontalLayout {
                             spacing: 8px;
                             padding-left: 8px;
-                            padding-right: 8px;
-                            Text { text: row.number;     horizontal-stretch: 1; vertical-alignment: center; }
-                            Text { text: row.customer;   horizontal-stretch: 3; vertical-alignment: center; }
-                            Text { text: row.issue-date; horizontal-stretch: 1; vertical-alignment: center; }
-                            Text { text: row.total + " Kč"; horizontal-stretch: 1; vertical-alignment: center; }
-                            HorizontalLayout {
-                                width: 220px;
+                            padding-right: 12px;
+                            Text { text: "Číslo";     width: 110px; horizontal-alignment: left; font-weight: 600; color: #9ca3af; }
+                            Text { text: "Odběratel"; horizontal-stretch: 1; horizontal-alignment: left; overflow: elide; font-weight: 600; color: #9ca3af; }
+                            Text { text: "Vystaveno"; width: 110px; horizontal-alignment: left; font-weight: 600; color: #9ca3af; }
+                            Text { text: "Celkem";    width: 130px; horizontal-alignment: right; font-weight: 600; color: #9ca3af; }
+                            Text { text: "Akce";      width: 220px; horizontal-alignment: center; font-weight: 600; color: #9ca3af; }
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: #2f2f35;
+                        }
+
+                        // History rows
+                        ScrollView {
+                            vertical-stretch: 1;
+
+                            VerticalLayout {
+                                padding: 0px;
                                 spacing: 4px;
-                                Button {
-                                    text: "PDF";
-                                    horizontal-stretch: 1;
-                                    clicked => { regenerate-pdf(row.id); }
-                                }
-                                Button {
-                                    text: "Upravit";
-                                    horizontal-stretch: 1;
-                                    clicked => { edit-invoice(row.id); }
-                                }
-                                Button {
-                                    text: "Smazat";
-                                    horizontal-stretch: 1;
-                                    clicked => { delete-invoice(row.id); }
+                                alignment: start;
+
+                                for row in history: HorizontalLayout {
+                                    spacing: 8px;
+                                    padding-left: 8px;
+                                    padding-right: 0px;
+                                    Text { text: row.number;     width: 110px; horizontal-alignment: left; vertical-alignment: center; color: #f3f4f6; }
+                                    Text { text: row.customer;   horizontal-stretch: 1; horizontal-alignment: left; overflow: elide; vertical-alignment: center; color: #f3f4f6; }
+                                    Text { text: row.issue-date; width: 110px; horizontal-alignment: left; vertical-alignment: center; color: #d1d5db; }
+                                    Text { text: row.total + " Kč"; width: 130px; horizontal-alignment: right; vertical-alignment: center; font-weight: 600; color: #f3f4f6; }
+                                    HorizontalLayout {
+                                        width: 220px;
+                                        spacing: 4px;
+                                        Button {
+                                            text: "PDF";
+                                            horizontal-stretch: 1;
+                                            clicked => { regenerate-pdf(row.id); }
+                                        }
+                                        Button {
+                                            text: "Upravit";
+                                            horizontal-stretch: 1;
+                                            clicked => { edit-invoice(row.id); }
+                                        }
+                                        Button {
+                                            text: "Smazat";
+                                            horizontal-stretch: 1;
+                                            clicked => { delete-invoice(row.id); }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -367,64 +864,71 @@ export component AppWindow inherits Window {
             title: "Nastavení dodavatele";
 
             ScrollView {
-                VerticalBox {
+                VerticalLayout {
                     padding: 16px;
-                    spacing: 10px;
+                    spacing: 12px;
+                    alignment: start;
 
-                    GroupBox {
+                    Card {
                         title: "Údaje vaší firmy";
-                        GridBox {
-                            spacing: 4px;
-                            Row {
-                                Text { text: "Název firmy:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-name; colspan: 3; }
-                            }
-                            Row {
-                                Text { text: "IČO:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-reg-id; }
-                                Text { text: "DIČ:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-vat-id; }
-                            }
-                            Row {
-                                Text { text: "Ulice a č.p.:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-street; colspan: 3; }
-                            }
-                            Row {
-                                Text { text: "PSČ:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-zip; width: 80px; }
-                                Text { text: "Město:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-city; }
-                            }
-                            Row {
-                                Text { text: "Číslo účtu (CZ):"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-account; colspan: 3; }
-                            }
-                            Row {
-                                Text { text: "IBAN:"; vertical-alignment: center; }
-                                LineEdit { text <=> sup-iban; colspan: 3; }
-                            }
-                            Row {
-                                Text { text: "Výchozí splatnost (dny):"; vertical-alignment: center; }
-                                SpinBox {
-                                    value <=> sup-due-days;
-                                    minimum: 1;
-                                    maximum: 365;
+
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 10px;
+
+                            GridBox {
+                                spacing: 6px;
+                                Row {
+                                    Text { text: "Název firmy:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-name; colspan: 3; }
+                                }
+                                Row {
+                                    Text { text: "IČO:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-reg-id; }
+                                    Text { text: "DIČ:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-vat-id; }
+                                }
+                                Row {
+                                    Text { text: "Ulice a č.p.:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-street; colspan: 3; }
+                                }
+                                Row {
+                                    Text { text: "PSČ:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-zip; width: 80px; }
+                                    Text { text: "Město:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-city; }
+                                }
+                                Row {
+                                    Text { text: "Číslo účtu (CZ):"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-account; colspan: 3; }
+                                }
+                                Row {
+                                    Text { text: "IBAN:"; vertical-alignment: center; color: #d1d5db; }
+                                    LineEdit { text <=> sup-iban; colspan: 3; }
+                                }
+                                Row {
+                                    Text { text: "Výchozí splatnost (dny):"; vertical-alignment: center; color: #d1d5db; }
+                                    SpinBox {
+                                        value <=> sup-due-days;
+                                        minimum: 1;
+                                        maximum: 365;
+                                    }
                                 }
                             }
                         }
                     }
 
-                    HorizontalBox {
+                    HorizontalLayout {
                         spacing: 12px;
                         alignment: start;
-                        Button {
+                        PrimaryButton {
                             text: "💾  Uložit nastavení";
                             clicked => { save-supplier(); }
                         }
                         Text {
                             text: supplier-status;
                             vertical-alignment: center;
-                            color: #27ae60;
+                            color: #4ade80;
                         }
                     }
                 }

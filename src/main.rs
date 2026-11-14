@@ -6,7 +6,7 @@ mod pdf;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use chrono::{Datelike, Local};
+use chrono::{Datelike, Local, NaiveDate};
 use rusqlite::Connection;
 use slint::{Model, VecModel};
 
@@ -61,11 +61,20 @@ fn main() {
     let items_model: Rc<VecModel<LineItemUI>> = Rc::new(VecModel::default());
     let history_model: Rc<VecModel<InvoiceRow>> = Rc::new(VecModel::default());
     let editing_invoice_id: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
+    let saved_customers: Rc<RefCell<Vec<Customer>>> = Rc::new(RefCell::new(Vec::new()));
 
     window.set_line_items(items_model.clone().into());
     window.set_history(history_model.clone().into());
 
     populate_history(&conn, &history_model);
+    refresh_saved_customers(&conn, &window, &saved_customers);
+
+    // Calendar state
+    let cal_target: Rc<RefCell<String>> = Rc::new(RefCell::new("issue".into()));
+    let cal_year: Rc<RefCell<i32>> = Rc::new(RefCell::new(today.year()));
+    let cal_month: Rc<RefCell<u32>> = Rc::new(RefCell::new(today.month()));
+    let cal_selected: Rc<RefCell<Option<NaiveDate>>> = Rc::new(RefCell::new(Some(today)));
+    update_calendar_view(&window, today.year(), today.month(), Some(today));
 
     // ── Callback: fetch ARES ────────────────────────────────────────────
     {
@@ -82,7 +91,235 @@ fn main() {
                     win.set_cust_city(data.city.as_str().into());
                     win.set_ares_status("".into());
                 }
-                Err(msg) => win.set_ares_status(msg.as_str().into()),
+                Err(msg) => {
+                    win.set_ares_status_is_error(true);
+                    win.set_ares_status(msg.as_str().into());
+                }
+            }
+        });
+    }
+
+    // ── Callback: select saved customer ─────────────────────────────────
+    {
+        let weak = window.as_weak();
+        let custs = saved_customers.clone();
+        window.on_select_saved_customer(move |index| {
+            if index <= 0 {
+                return;
+            }
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let idx = (index - 1) as usize;
+            let list = custs.borrow();
+            if let Some(c) = list.get(idx) {
+                win.set_cust_name(c.name.as_str().into());
+                win.set_cust_reg_id(c.reg_id.as_str().into());
+                win.set_cust_vat_id(c.vat_id.as_str().into());
+                win.set_cust_street(c.street.as_str().into());
+                win.set_cust_zip(c.zip.as_str().into());
+                win.set_cust_city(c.city.as_str().into());
+                win.set_ares_status("".into());
+            }
+        });
+    }
+
+    // ── Callback: manually save customer ────────────────────────────────
+    {
+        let weak = window.as_weak();
+        let custs = saved_customers.clone();
+        window.on_save_customer(move || {
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let customer = Customer {
+                name: win.get_cust_name().to_string(),
+                reg_id: win.get_cust_reg_id().to_string(),
+                vat_id: win.get_cust_vat_id().to_string(),
+                street: win.get_cust_street().to_string(),
+                zip: win.get_cust_zip().to_string(),
+                city: win.get_cust_city().to_string(),
+            };
+            if customer.reg_id.trim().is_empty() {
+                win.set_ares_status_is_error(true);
+                win.set_ares_status("Zadejte IČO pro uložení firmy".into());
+                return;
+            }
+            let conn = match Connection::open("faktury.db") {
+                Ok(c) => c,
+                Err(e) => {
+                    win.set_ares_status_is_error(true);
+                    win.set_ares_status(format!("Chyba DB: {}", e).as_str().into());
+                    return;
+                }
+            };
+            match db::save_customer(&conn, &customer) {
+                Ok(_) => {
+                    refresh_saved_customers(&conn, &win, &custs);
+                    win.set_ares_status_is_error(false);
+                    win.set_ares_status("✓ Firma uložena".into());
+
+                    let list = custs.borrow();
+                    if let Some(pos) = list.iter().position(|c| c.reg_id == customer.reg_id) {
+                        win.set_selected_customer_index((pos + 1) as i32);
+                    }
+                }
+                Err(e) => {
+                    win.set_ares_status_is_error(true);
+                    win.set_ares_status(format!("Chyba DB: {}", e).as_str().into());
+                }
+            }
+        });
+    }
+
+    // ── Callback: delete saved customer ─────────────────────────────────
+    {
+        let weak = window.as_weak();
+        let custs = saved_customers.clone();
+        window.on_delete_saved_customer(move |index| {
+            if index <= 0 {
+                return;
+            }
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let idx = (index - 1) as usize;
+            let reg_id = {
+                let list = custs.borrow();
+                list.get(idx).map(|c| c.reg_id.clone())
+            };
+
+            if let Some(ico) = reg_id {
+                let conn = match Connection::open("faktury.db") {
+                    Ok(c) => c,
+                    Err(e) => {
+                        win.set_ares_status_is_error(true);
+                        win.set_ares_status(format!("Chyba DB: {}", e).as_str().into());
+                        return;
+                    }
+                };
+                match db::delete_customer(&conn, &ico) {
+                    Ok(_) => {
+                        refresh_saved_customers(&conn, &win, &custs);
+                        win.set_selected_customer_index(0);
+                        win.set_ares_status_is_error(false);
+                        win.set_ares_status("✓ Odběratel smazán".into());
+                    }
+                    Err(e) => {
+                        win.set_ares_status_is_error(true);
+                        win.set_ares_status(format!("Chyba DB: {}", e).as_str().into());
+                    }
+                }
+            }
+        });
+    }
+
+    // ── Callback: issue date edited ─────────────────────────────────────
+    {
+        let weak = window.as_weak();
+        window.on_issue_date_edited(move |val| {
+            if let Some(win) = weak.upgrade() {
+                update_due_date_from_issue(&win, val.as_str());
+            }
+        });
+    }
+
+    // ── Callback: open calendar popup ───────────────────────────────────
+    {
+        let weak = window.as_weak();
+        let target_ref = cal_target.clone();
+        let year_ref = cal_year.clone();
+        let month_ref = cal_month.clone();
+        let sel_ref = cal_selected.clone();
+        window.on_open_calendar(move |target, current_date_str| {
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            *target_ref.borrow_mut() = target.to_string();
+
+            let parsed = parse_date(current_date_str.as_str());
+            let (y, m) = match parsed {
+                Some(d) => (d.year(), d.month()),
+                None => {
+                    let now = Local::now().date_naive();
+                    (now.year(), now.month())
+                }
+            };
+            *year_ref.borrow_mut() = y;
+            *month_ref.borrow_mut() = m;
+            *sel_ref.borrow_mut() = parsed;
+
+            update_calendar_view(&win, y, m, parsed);
+        });
+    }
+
+    // ── Callbacks: calendar month navigation ────────────────────────────
+    {
+        let weak = window.as_weak();
+        let year_ref = cal_year.clone();
+        let month_ref = cal_month.clone();
+        let sel_ref = cal_selected.clone();
+        window.on_prev_calendar_month(move || {
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let mut y = *year_ref.borrow();
+            let mut m = *month_ref.borrow();
+            if m <= 1 {
+                y -= 1;
+                m = 12;
+            } else {
+                m -= 1;
+            }
+            *year_ref.borrow_mut() = y;
+            *month_ref.borrow_mut() = m;
+            update_calendar_view(&win, y, m, *sel_ref.borrow());
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let year_ref = cal_year.clone();
+        let month_ref = cal_month.clone();
+        let sel_ref = cal_selected.clone();
+        window.on_next_calendar_month(move || {
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let mut y = *year_ref.borrow();
+            let mut m = *month_ref.borrow();
+            if m >= 12 {
+                y += 1;
+                m = 1;
+            } else {
+                m += 1;
+            }
+            *year_ref.borrow_mut() = y;
+            *month_ref.borrow_mut() = m;
+            update_calendar_view(&win, y, m, *sel_ref.borrow());
+        });
+    }
+
+    // ── Callback: select calendar day ───────────────────────────────────
+    {
+        let weak = window.as_weak();
+        let target_ref = cal_target.clone();
+        window.on_select_calendar_day(move |date_str| {
+            let win = match weak.upgrade() {
+                Some(w) => w,
+                None => return,
+            };
+            let target = target_ref.borrow().clone();
+            if target == "issue" {
+                win.set_inv_issue_date(date_str.clone());
+                update_due_date_from_issue(&win, date_str.as_str());
+            } else {
+                win.set_inv_due_date(date_str);
             }
         });
     }
@@ -162,6 +399,7 @@ fn main() {
         let items_ref = items_model.clone();
         let history_ref = history_model.clone();
         let editing_id = editing_invoice_id.clone();
+        let custs_ref = saved_customers.clone();
 
         window.on_save_invoice(move || {
             let win = match weak.upgrade() {
@@ -184,6 +422,12 @@ fn main() {
                 zip: win.get_cust_zip().to_string(),
                 city: win.get_cust_city().to_string(),
             };
+
+            // Automatically save/update customer in customers table if reg_id is non-empty
+            if !customer.reg_id.trim().is_empty() {
+                let _ = db::save_customer(&conn, &customer);
+                refresh_saved_customers(&conn, &win, &custs_ref);
+            }
 
             let items = collect_items(&items_ref);
             let (excl_vat, vat_amount, incl_vat) = compute_totals(&items);
@@ -223,10 +467,11 @@ fn main() {
                         Ok(_) => {
                             let path_str = output_path.to_string_lossy().to_string();
                             let _ = db::set_invoice_pdf_path(&conn, id, &path_str);
+                            win.set_is_editing(false);
                             win.set_invoice_status(if is_editing.is_some() {
-                                "✓ Faktura upravena a PDF vygenerováno".into()
+                                "✓ Faktura upravena".into()
                             } else {
-                                "✓ PDF vygenerováno a otevřeno".into()
+                                "✓ PDF vygenerováno".into()
                             });
                             pdf::open(&output_path);
 
@@ -284,6 +529,8 @@ fn main() {
             win.set_inv_issue_date(today.format("%d.%m.%Y").to_string().as_str().into());
             win.set_inv_due_date(due.format("%d.%m.%Y").to_string().as_str().into());
             win.set_inv_payment_method("Převodem".into());
+            win.set_selected_customer_index(0);
+            win.set_is_editing(false);
             win.set_invoice_status("".into());
         });
     }
@@ -344,9 +591,8 @@ fn main() {
                     // Recalculate totals
                     recalculate_totals(&win, &items_ref);
 
-                    win.set_invoice_status(
-                        format!("Upravujete fakturu č. {}", invoice.number).as_str().into(),
-                    );
+                    win.set_is_editing(true);
+                    win.set_invoice_status("".into());
 
                     // Switch active tab to "Nová faktura" (index 0)
                     win.set_active_tab(0);
@@ -389,6 +635,8 @@ fn main() {
                         *editing_id.borrow_mut() = None;
                         reset_invoice_form(&win, &items_ref);
                         advance_invoice_number(&conn, &win);
+                        win.set_is_editing(false);
+                        win.set_invoice_status("".into());
                     }
 
                     // Auto-refresh history
@@ -502,4 +750,106 @@ fn reset_invoice_form(win: &AppWindow, items: &VecModel<LineItemUI>) {
     win.set_inv_total_excl_vat("0,00".into());
     win.set_inv_total_vat("0,00".into());
     win.set_inv_total_incl_vat("0,00".into());
+    win.set_selected_customer_index(0);
+}
+
+/// Refreshes the saved customers list and updates the UI dropdown.
+fn refresh_saved_customers(
+    conn: &Connection,
+    win: &AppWindow,
+    cache: &Rc<RefCell<Vec<Customer>>>,
+) {
+    match db::list_customers(conn) {
+        Ok(list) => {
+            let mut labels: Vec<slint::SharedString> =
+                vec!["-- Vyberte odběratele --".into()];
+            for c in &list {
+                labels.push(format!("{} ({})", c.name, c.reg_id).as_str().into());
+            }
+            *cache.borrow_mut() = list;
+            win.set_saved_customers(Rc::new(VecModel::from(labels)).into());
+        }
+        Err(e) => eprintln!("Cannot load customers: {}", e),
+    }
+}
+
+/// Parses date string in "DD.MM.YYYY" or "D.M.YYYY" format.
+fn parse_date(s: &str) -> Option<NaiveDate> {
+    let s = s.trim();
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%d.%m.%Y") {
+        return Some(d);
+    }
+    let parts: Vec<&str> = s.split('.').map(|p| p.trim()).collect();
+    if parts.len() == 3 {
+        let day: u32 = parts[0].parse().ok()?;
+        let month: u32 = parts[1].parse().ok()?;
+        let year: i32 = parts[2].parse().ok()?;
+        NaiveDate::from_ymd_opt(year, month, day)
+    } else {
+        None
+    }
+}
+
+/// Updates the invoice due date when the issue date changes.
+fn update_due_date_from_issue(win: &AppWindow, issue_str: &str) {
+    if let Some(issue_date) = parse_date(issue_str) {
+        let due_days = win.get_sup_due_days().max(1) as i64;
+        let due_date = issue_date + chrono::Duration::days(due_days);
+        win.set_inv_due_date(due_date.format("%d.%m.%Y").to_string().as_str().into());
+    }
+}
+
+/// Rebuilds the 42-day calendar model for the specified month/year.
+fn update_calendar_view(
+    win: &AppWindow,
+    year: i32,
+    month: u32,
+    selected: Option<NaiveDate>,
+) {
+    let czech_months = [
+        "Leden", "Únor", "Březen", "Duben", "Květen", "Červen",
+        "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec",
+    ];
+    let month_name = czech_months.get(month.saturating_sub(1) as usize).unwrap_or(&"");
+    win.set_calendar_title(format!("{} {}", month_name, year).as_str().into());
+
+    let first_day = match NaiveDate::from_ymd_opt(year, month, 1) {
+        Some(d) => d,
+        None => return,
+    };
+
+    let days_before = first_day.weekday().num_days_from_monday();
+    let start_date = first_day - chrono::Duration::days(days_before as i64);
+    let today = Local::now().date_naive();
+
+    let mut days = Vec::with_capacity(42);
+    for i in 0..42 {
+        let curr = start_date + chrono::Duration::days(i);
+        let in_month = curr.month() == month;
+        let is_today = curr == today;
+        let is_selected = selected == Some(curr);
+        days.push(CalendarDay {
+            day_text: curr.day().to_string().as_str().into(),
+            date_str: curr.format("%d.%m.%Y").to_string().as_str().into(),
+            in_month,
+            is_today,
+            is_selected,
+        });
+    }
+
+    let mut weeks = Vec::with_capacity(6);
+    for w in 0..6 {
+        let base = w * 7;
+        weeks.push(CalendarWeek {
+            d0: days[base].clone(),
+            d1: days[base + 1].clone(),
+            d2: days[base + 2].clone(),
+            d3: days[base + 3].clone(),
+            d4: days[base + 4].clone(),
+            d5: days[base + 5].clone(),
+            d6: days[base + 6].clone(),
+        });
+    }
+
+    win.set_calendar_weeks(Rc::new(VecModel::from(weeks)).into());
 }

@@ -50,7 +50,73 @@ pub fn init(conn: &Connection) -> Result<()> {
             unit_price  REAL NOT NULL DEFAULT 0,
             vat_rate    INTEGER NOT NULL DEFAULT 21
         );
+
+        CREATE TABLE IF NOT EXISTS customers (
+            ico    TEXT PRIMARY KEY,
+            name   TEXT NOT NULL DEFAULT '',
+            dic    TEXT NOT NULL DEFAULT '',
+            street TEXT NOT NULL DEFAULT '',
+            zip    TEXT NOT NULL DEFAULT '',
+            city   TEXT NOT NULL DEFAULT ''
+        );
     ")?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+pub fn save_customer(conn: &Connection, c: &Customer) -> Result<()> {
+    if c.reg_id.trim().is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO customers (ico, name, dic, street, zip, city)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(ico) DO UPDATE SET
+             name   = excluded.name,
+             dic    = excluded.dic,
+             street = excluded.street,
+             zip    = excluded.zip,
+             city   = excluded.city",
+        params![
+            c.reg_id.trim(),
+            c.name.trim(),
+            c.vat_id.trim(),
+            c.street.trim(),
+            c.zip.trim(),
+            c.city.trim(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn list_customers(conn: &Connection) -> Result<Vec<Customer>> {
+    let mut stmt = conn.prepare(
+        "SELECT ico, name, dic, street, zip, city
+         FROM customers
+         ORDER BY name COLLATE NOCASE ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Customer {
+            reg_id: row.get(0)?,
+            name: row.get(1)?,
+            vat_id: row.get(2)?,
+            street: row.get(3)?,
+            zip: row.get(4)?,
+            city: row.get(5)?,
+        })
+    })?;
+    let mut customers = Vec::new();
+    for c in rows {
+        customers.push(c?);
+    }
+    Ok(customers)
+}
+
+pub fn delete_customer(conn: &Connection, ico: &str) -> Result<()> {
+    conn.execute("DELETE FROM customers WHERE ico = ?1", params![ico])?;
     Ok(())
 }
 
@@ -434,5 +500,41 @@ mod tests {
         assert_eq!(pdf_path, Some("invoices/0001_2026.pdf".into()));
         let list = list_invoices(&conn).unwrap();
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn test_customer_crud() {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+
+        let customer = Customer {
+            name: "ACME Corp".into(),
+            reg_id: "12345678".into(),
+            vat_id: "CZ12345678".into(),
+            street: "Main St 1".into(),
+            zip: "110 00".into(),
+            city: "Prague".into(),
+        };
+        save_customer(&conn, &customer).unwrap();
+
+        let list = list_customers(&conn).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "ACME Corp");
+        assert_eq!(list[0].reg_id, "12345678");
+
+        // Test upsert update
+        let updated = Customer {
+            name: "ACME Corp s.r.o.".into(),
+            ..customer
+        };
+        save_customer(&conn, &updated).unwrap();
+        let list2 = list_customers(&conn).unwrap();
+        assert_eq!(list2.len(), 1);
+        assert_eq!(list2[0].name, "ACME Corp s.r.o.");
+
+        // Test delete
+        delete_customer(&conn, "12345678").unwrap();
+        let list3 = list_customers(&conn).unwrap();
+        assert!(list3.is_empty());
     }
 }

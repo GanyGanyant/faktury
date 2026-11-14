@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Local SQLite database & journals
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Generated invoices & temporary Typst data
+*.pdf
+/invoices/
+templates/invoice_data.json
+
+# AI instructions & IDE configs
+GEMINI.md
+.gemini/
+.antigravity/
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
