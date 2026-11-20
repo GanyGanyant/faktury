@@ -1,3 +1,0 @@
-[env]
-PKG_CONFIG_PATH = "/tmp/fc-extract/usr/lib64/pkgconfig"
-CPATH = "/tmp/fc-extract/usr/include"

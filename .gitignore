@@ -2,6 +2,9 @@
 /target/
 **/*.rs.bk
 
+# Local Cargo configuration
+.cargo/config.toml
+
 # Local SQLite database & journals
 *.db
 *.db-wal
