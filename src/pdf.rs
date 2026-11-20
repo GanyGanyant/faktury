@@ -29,8 +29,13 @@ pub fn compile(
         .map_err(|e| format!("Failed to serialize invoice data: {}", e))?;
 
     // Ensure templates directory exists and write invoice_data.json
-    std::fs::create_dir_all(templates_dir)
-        .map_err(|e| format!("Cannot create templates directory {}: {}", templates_dir.display(), e))?;
+    std::fs::create_dir_all(templates_dir).map_err(|e| {
+        format!(
+            "Cannot create templates directory {}: {}",
+            templates_dir.display(),
+            e
+        )
+    })?;
 
     let json_path = templates_dir.join("invoice_data.json");
     std::fs::write(&json_path, &json_bytes)
@@ -38,7 +43,10 @@ pub fn compile(
 
     let template_path = templates_dir.join(template_name);
     if !template_path.exists() {
-        return Err(format!("Template file does not exist: {}", template_path.display()));
+        return Err(format!(
+            "Template file does not exist: {}",
+            template_path.display()
+        ));
     }
 
     // Ensure output directory exists
@@ -60,10 +68,16 @@ pub fn compile(
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("External typst CLI returned error: {}. Trying embedded engine...", stderr);
+            eprintln!(
+                "External typst CLI returned error: {}. Trying embedded engine...",
+                stderr
+            );
         }
         Err(err) => {
-            eprintln!("External typst CLI unavailable ({}). Using embedded engine...", err);
+            eprintln!(
+                "External typst CLI unavailable ({}). Using embedded engine...",
+                err
+            );
         }
     }
 
@@ -174,14 +188,14 @@ mod tests {
 
         let template_data = TemplateData::from_parts(&invoice, &supplier, &customer, &items);
 
-        let temp_dir = std::env::temp_dir().join("faktury_test_templates");
-        let _ = std::fs::create_dir_all(&temp_dir);
+        let temp = crate::test_util::TestTempDir::new("pdf_compile");
+        let temp_dir = temp.path();
 
         // Test klasicka template
         let klasicka_path = temp_dir.join("klasicka.typ");
         std::fs::write(&klasicka_path, include_str!("../templates/faktura.typ")).unwrap();
         let out_klasicka = temp_dir.join("test_klasicka.pdf");
-        let res = compile(&template_data, &temp_dir, "klasicka.typ", &out_klasicka);
+        let res = compile(&template_data, temp_dir, "klasicka.typ", &out_klasicka);
         assert!(res.is_ok(), "Failed to compile klasicka: {:?}", res);
         assert!(out_klasicka.exists());
 
@@ -189,12 +203,25 @@ mod tests {
         let moderni_path = temp_dir.join("moderni.typ");
         std::fs::write(&moderni_path, include_str!("../templates/moderni.typ")).unwrap();
         let out_moderni = temp_dir.join("test_moderni.pdf");
-        let res_moderni = compile(&template_data, &temp_dir, "moderni.typ", &out_moderni);
-        assert!(res_moderni.is_ok(), "Failed to compile moderni: {:?}", res_moderni);
+        let res_moderni = compile(&template_data, temp_dir, "moderni.typ", &out_moderni);
+        assert!(
+            res_moderni.is_ok(),
+            "Failed to compile moderni: {:?}",
+            res_moderni
+        );
         assert!(out_moderni.exists());
+    }
 
-        // Clean up test PDFs
-        let _ = std::fs::remove_file(out_klasicka);
-        let _ = std::fs::remove_file(out_moderni);
+    #[test]
+    fn test_pdf_output_path() {
+        let output_dir = Path::new("/tmp/invoices");
+        assert_eq!(
+            pdf_output_path(output_dir, "0001/2026"),
+            output_dir.join("faktura_0001_2026.pdf")
+        );
+        assert_eq!(
+            pdf_output_path(output_dir, "faktura_0001/2026"),
+            output_dir.join("faktura_0001_2026.pdf")
+        );
     }
 }

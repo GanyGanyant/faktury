@@ -69,12 +69,6 @@ impl LineItem {
     pub fn total_with_vat(&self) -> f64 {
         self.subtotal() * (1.0 + self.vat_rate as f64 / 100.0)
     }
-
-    /// Returns the calculated VAT amount for this line item.
-    #[allow(dead_code)]
-    pub fn vat_amount(&self) -> f64 {
-        self.total_with_vat() - self.subtotal()
-    }
 }
 
 impl Default for LineItem {
@@ -283,4 +277,241 @@ pub fn compute_totals(items: &[LineItem]) -> (f64, f64, f64) {
     let incl_vat: f64 = items.iter().map(|i| i.total_with_vat()).sum();
     let vat_amount = incl_vat - excl_vat;
     (round2(excl_vat), round2(vat_amount), round2(incl_vat))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_approx_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn test_round2() {
+        assert_approx_eq(round2(1.234), 1.23);
+        assert_approx_eq(round2(1.235), 1.24);
+        assert_approx_eq(round2(1.236), 1.24);
+        assert_approx_eq(round2(0.0), 0.0);
+        assert_approx_eq(round2(-1.234), -1.23);
+        assert_approx_eq(round2(-1.235), -1.24);
+        assert_approx_eq(round2(0.1 + 0.2), 0.3);
+    }
+
+    #[test]
+    fn test_format_amount() {
+        assert_eq!(format_amount(100.0), "100,00");
+        assert_eq!(format_amount(1234.5), "1234,50");
+        assert_eq!(format_amount(12.345), "12,35");
+        assert_eq!(format_amount(0.0), "0,00");
+        assert_eq!(format_amount(-42.1), "-42,10");
+    }
+
+    #[test]
+    fn test_line_item_defaults_and_calculations() {
+        let def = LineItem::default();
+        assert_eq!(def.description, "");
+        assert_approx_eq(def.quantity, 1.0);
+        assert_eq!(def.unit, "ks");
+        assert_approx_eq(def.unit_price, 0.0);
+        assert_eq!(def.vat_rate, 21);
+
+        let item_21 = LineItem {
+            description: "Development".into(),
+            quantity: 2.5,
+            unit: "hod".into(),
+            unit_price: 100.0,
+            vat_rate: 21,
+        };
+        assert_approx_eq(item_21.subtotal(), 250.0);
+        assert_approx_eq(item_21.total_with_vat(), 302.5);
+
+        let item_12 = LineItem {
+            description: "Book".into(),
+            quantity: 1.5,
+            unit: "ks".into(),
+            unit_price: 200.0,
+            vat_rate: 12,
+        };
+        assert_approx_eq(item_12.subtotal(), 300.0);
+        assert_approx_eq(item_12.total_with_vat(), 336.0);
+
+        let item_0 = LineItem {
+            description: "Exempt".into(),
+            quantity: 3.0,
+            unit: "ks".into(),
+            unit_price: 50.0,
+            vat_rate: 0,
+        };
+        assert_approx_eq(item_0.subtotal(), 150.0);
+        assert_approx_eq(item_0.total_with_vat(), 150.0);
+    }
+
+    #[test]
+    fn test_compute_totals() {
+        let (excl_empty, vat_empty, incl_empty) = compute_totals(&[]);
+        assert_approx_eq(excl_empty, 0.0);
+        assert_approx_eq(vat_empty, 0.0);
+        assert_approx_eq(incl_empty, 0.0);
+
+        let single = [LineItem {
+            description: "Service".into(),
+            quantity: 2.0,
+            unit: "hod".into(),
+            unit_price: 1000.0,
+            vat_rate: 21,
+        }];
+        let (excl_s, vat_s, incl_s) = compute_totals(&single);
+        assert_approx_eq(excl_s, 2000.0);
+        assert_approx_eq(vat_s, 420.0);
+        assert_approx_eq(incl_s, 2420.0);
+
+        let mixed = [
+            LineItem {
+                description: "Item 21%".into(),
+                quantity: 1.5,
+                unit: "hod".into(),
+                unit_price: 333.33,
+                vat_rate: 21,
+            },
+            LineItem {
+                description: "Item 12%".into(),
+                quantity: 2.25,
+                unit: "ks".into(),
+                unit_price: 40.5,
+                vat_rate: 12,
+            },
+            LineItem {
+                description: "Item 0%".into(),
+                quantity: 3.0,
+                unit: "ks".into(),
+                unit_price: 10.11,
+                vat_rate: 0,
+            },
+        ];
+        // excl = 499.995 + 91.125 + 30.33 = 621.45
+        // incl = 604.99395 + 102.06 + 30.33 = 737.38395 -> round2 = 737.38
+        // vat  = 737.38395 - 621.45 = 115.93395 -> round2 = 115.93
+        let (excl_m, vat_m, incl_m) = compute_totals(&mixed);
+        assert_approx_eq(excl_m, 621.45);
+        assert_approx_eq(vat_m, 115.93);
+        assert_approx_eq(incl_m, 737.38);
+
+        let zero_only = [LineItem {
+            description: "Zero VAT".into(),
+            quantity: 4.0,
+            unit: "ks".into(),
+            unit_price: 25.5,
+            vat_rate: 0,
+        }];
+        let (excl_z, vat_z, incl_z) = compute_totals(&zero_only);
+        assert_approx_eq(excl_z, 102.0);
+        assert_approx_eq(vat_z, 0.0);
+        assert_approx_eq(incl_z, 102.0);
+    }
+
+    #[test]
+    fn test_template_data_from_parts_and_json_contract() {
+        let invoice = Invoice {
+            id: Some(7),
+            number: "0007/2026".into(),
+            variable_symbol: "00072026".into(),
+            issue_date: "14.11.2026".into(),
+            due_date: "28.11.2026".into(),
+            payment_method: "Převodem".into(),
+            note: "Poznámka k faktuře".into(),
+            total_excl_vat: 100.126,
+            total_vat: 21.024,
+            total_incl_vat: 121.154,
+            customer_name: "Odběratel s.r.o.".into(),
+            pdf_path: None,
+        };
+
+        let supplier = Supplier {
+            name: "Dodavatel s.r.o.".into(),
+            reg_id: "12345678".into(),
+            vat_id: "CZ12345678".into(),
+            street: "Dlouhá 1".into(),
+            zip: "110 00".into(),
+            city: "Praha".into(),
+            account_cz: "123456/0100".into(),
+            iban: "CZ6508000000192000145399".into(),
+            default_due_days: 14,
+        };
+
+        let customer = Customer {
+            name: "Odběratel s.r.o.".into(),
+            reg_id: "87654321".into(),
+            vat_id: "CZ87654321".into(),
+            street: "Krátká 2".into(),
+            zip: "602 00".into(),
+            city: "Brno".into(),
+        };
+
+        let items = vec![LineItem {
+            description: "Konzultace".into(),
+            quantity: 1.236,
+            unit: "hod".into(),
+            unit_price: 99.995,
+            vat_rate: 21,
+        }];
+
+        let data = TemplateData::from_parts(&invoice, &supplier, &customer, &items);
+
+        assert_eq!(data.invoice_number, "0007/2026");
+        assert_eq!(data.variable_symbol, "00072026");
+        assert_eq!(data.issue_date, "14.11.2026");
+        assert_eq!(data.due_date, "28.11.2026");
+        assert_eq!(data.payment_method, "Převodem");
+        assert_eq!(data.note, "Poznámka k faktuře");
+        assert_approx_eq(data.total_without_vat, 100.13);
+        assert_approx_eq(data.total_vat, 21.02);
+        assert_approx_eq(data.total_with_vat, 121.15);
+
+        assert_eq!(data.supplier.name, "Dodavatel s.r.o.");
+        assert_eq!(data.supplier.street, "Dlouhá 1");
+        assert_eq!(data.supplier.zip, "110 00");
+        assert_eq!(data.supplier.city, "Praha");
+        assert_eq!(data.supplier.ico, "12345678");
+        assert_eq!(data.supplier.dic, "CZ12345678");
+        assert_eq!(data.supplier.bank_account, "123456/0100");
+        assert_eq!(data.supplier.iban, "CZ6508000000192000145399");
+
+        assert_eq!(data.customer.name, "Odběratel s.r.o.");
+        assert_eq!(data.customer.street, "Krátká 2");
+        assert_eq!(data.customer.zip, "602 00");
+        assert_eq!(data.customer.city, "Brno");
+        assert_eq!(data.customer.ico, "87654321");
+        assert_eq!(data.customer.dic, "CZ87654321");
+
+        assert_eq!(data.items.len(), 1);
+        assert_eq!(data.items[0].description, "Konzultace");
+        assert_approx_eq(data.items[0].quantity, 1.24);
+        assert_eq!(data.items[0].unit, "hod");
+        assert_approx_eq(data.items[0].unit_price, 100.0);
+        assert_eq!(data.items[0].vat_rate, 21);
+        // 1.236 * 99.995 * 1.21 = 149.5484222 -> round2 = 149.55
+        assert_approx_eq(data.items[0].total, 149.55);
+
+        let json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["invoice_number"], "0007/2026");
+        assert_eq!(json["variable_symbol"], "00072026");
+        assert_eq!(json["issue_date"], "14.11.2026");
+        assert_eq!(json["due_date"], "28.11.2026");
+        assert_eq!(json["payment_method"], "Převodem");
+        assert_eq!(json["note"], "Poznámka k faktuře");
+        assert!(json.get("total_without_vat").is_some());
+        assert!(json.get("total_vat").is_some());
+        assert!(json.get("total_with_vat").is_some());
+        assert_eq!(json["supplier"]["ico"], "12345678");
+        assert_eq!(json["supplier"]["dic"], "CZ12345678");
+        assert_eq!(json["supplier"]["bank_account"], "123456/0100");
+        assert_eq!(json["customer"]["ico"], "87654321");
+        assert_eq!(json["customer"]["dic"], "CZ87654321");
+        assert!(json["items"].is_array());
+        assert_eq!(json["items"][0]["vat_rate"], 21);
+    }
 }

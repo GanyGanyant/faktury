@@ -10,7 +10,8 @@ use crate::models::{Customer, Invoice, LineItem};
 ///
 /// Creates `invoices`, `line_items`, and `customers` tables.
 pub fn init(conn: &Connection) -> Result<()> {
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS invoices (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             number          TEXT NOT NULL,
@@ -49,7 +50,8 @@ pub fn init(conn: &Connection) -> Result<()> {
             zip    TEXT NOT NULL DEFAULT '',
             city   TEXT NOT NULL DEFAULT ''
         );
-    ")?;
+    ",
+    )?;
     Ok(())
 }
 
@@ -124,15 +126,12 @@ fn max_invoice_seq_for_year(conn: &Connection, year: i32) -> Result<i64> {
     let mut stmt = conn.prepare("SELECT number FROM invoices WHERE number LIKE ?1")?;
     let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
     let mut max_seq: i64 = 0;
-    for r in rows {
-        if let Ok(num) = r {
-            if let Some(prefix) = num.split('/').next() {
-                if let Ok(val) = prefix.parse::<i64>() {
-                    if val > max_seq {
-                        max_seq = val;
-                    }
-                }
-            }
+    for num in rows.flatten() {
+        if let Some(prefix) = num.split('/').next()
+            && let Ok(val) = prefix.parse::<i64>()
+            && val > max_seq
+        {
+            max_seq = val;
         }
     }
     Ok(max_seq)
@@ -172,11 +171,21 @@ pub fn save_invoice(
             customer_street, customer_zip, customer_city
          ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
-            inv.number, inv.variable_symbol, inv.issue_date, inv.due_date,
-            inv.payment_method, inv.note,
-            inv.total_excl_vat, inv.total_vat, inv.total_incl_vat,
-            customer.name, customer.reg_id, customer.vat_id,
-            customer.street, customer.zip, customer.city
+            inv.number,
+            inv.variable_symbol,
+            inv.issue_date,
+            inv.due_date,
+            inv.payment_method,
+            inv.note,
+            inv.total_excl_vat,
+            inv.total_vat,
+            inv.total_incl_vat,
+            customer.name,
+            customer.reg_id,
+            customer.vat_id,
+            customer.street,
+            customer.zip,
+            customer.city
         ],
     )?;
     let invoice_id = conn.last_insert_rowid();
@@ -187,8 +196,12 @@ pub fn save_invoice(
                 (invoice_id, description, quantity, unit, unit_price, vat_rate)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
-                invoice_id, item.description, item.quantity,
-                item.unit, item.unit_price, item.vat_rate as i64
+                invoice_id,
+                item.description,
+                item.quantity,
+                item.unit,
+                item.unit_price,
+                item.vat_rate as i64
             ],
         )?;
     }
@@ -223,19 +236,26 @@ pub fn update_invoice(
             customer_city = ?15
          WHERE id = ?16",
         params![
-            inv.number, inv.variable_symbol, inv.issue_date, inv.due_date,
-            inv.payment_method, inv.note,
-            inv.total_excl_vat, inv.total_vat, inv.total_incl_vat,
-            customer.name, customer.reg_id, customer.vat_id,
-            customer.street, customer.zip, customer.city,
+            inv.number,
+            inv.variable_symbol,
+            inv.issue_date,
+            inv.due_date,
+            inv.payment_method,
+            inv.note,
+            inv.total_excl_vat,
+            inv.total_vat,
+            inv.total_incl_vat,
+            customer.name,
+            customer.reg_id,
+            customer.vat_id,
+            customer.street,
+            customer.zip,
+            customer.city,
             id
         ],
     )?;
 
-    conn.execute(
-        "DELETE FROM line_items WHERE invoice_id = ?1",
-        params![id],
-    )?;
+    conn.execute("DELETE FROM line_items WHERE invoice_id = ?1", params![id])?;
 
     for item in items {
         conn.execute(
@@ -243,8 +263,12 @@ pub fn update_invoice(
                 (invoice_id, description, quantity, unit, unit_price, vat_rate)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
-                id, item.description, item.quantity,
-                item.unit, item.unit_price, item.vat_rate as i64
+                id,
+                item.description,
+                item.quantity,
+                item.unit,
+                item.unit_price,
+                item.vat_rate as i64
             ],
         )?;
     }
@@ -429,15 +453,13 @@ mod tests {
             total_excl_vat: 300.0,
             ..invoice
         };
-        let updated_items = vec![
-            LineItem {
-                description: "Service B".into(),
-                quantity: 3.0,
-                unit: "ks".into(),
-                unit_price: 100.0,
-                vat_rate: 21,
-            },
-        ];
+        let updated_items = vec![LineItem {
+            description: "Service B".into(),
+            quantity: 3.0,
+            unit: "ks".into(),
+            unit_price: 100.0,
+            vat_rate: 21,
+        }];
 
         update_invoice(&conn, id, &updated_invoice, &updated_items, &customer).unwrap();
         let (detail_inv, _, detail_items) = load_invoice_detail(&conn, id).unwrap();

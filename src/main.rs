@@ -14,14 +14,12 @@ use rusqlite::Connection;
 use slint::{Model, VecModel};
 
 use config::AppPaths;
-use models::{
-    compute_totals, format_amount, Customer, Invoice, LineItem, TemplateData,
-};
+use models::{Customer, Invoice, LineItem, TemplateData, compute_totals, format_amount};
 
 slint::include_modules!();
 
 fn open_db(paths: &AppPaths) -> rusqlite::Result<Connection> {
-    Connection::open(&paths.db_path())
+    Connection::open(paths.db_path())
 }
 
 fn main() {
@@ -44,10 +42,10 @@ fn main() {
     let supplier = app_config.to_supplier();
 
     let year = Local::now().year();
-    let initial_number = db::next_invoice_number(&conn, year)
-        .unwrap_or_else(|_| format!("0001/{}", year));
-    let initial_vs = db::next_variable_symbol(&conn, year)
-        .unwrap_or_else(|_| format!("0001{}", year));
+    let initial_number =
+        db::next_invoice_number(&conn, year).unwrap_or_else(|_| format!("0001/{}", year));
+    let initial_vs =
+        db::next_variable_symbol(&conn, year).unwrap_or_else(|_| format!("0001{}", year));
 
     let today = Local::now().date_naive();
     let due = today + chrono::Duration::days(supplier.default_due_days as i64);
@@ -294,14 +292,7 @@ fn main() {
                 Some(w) => w,
                 None => return,
             };
-            let mut y = *year_ref.borrow();
-            let mut m = *month_ref.borrow();
-            if m == 1 {
-                m = 12;
-                y -= 1;
-            } else {
-                m -= 1;
-            }
+            let (y, m) = prev_month(*year_ref.borrow(), *month_ref.borrow());
             *year_ref.borrow_mut() = y;
             *month_ref.borrow_mut() = m;
             update_calendar_view(&win, y, m, *sel_ref.borrow());
@@ -318,14 +309,7 @@ fn main() {
                 Some(w) => w,
                 None => return,
             };
-            let mut y = *year_ref.borrow();
-            let mut m = *month_ref.borrow();
-            if m == 12 {
-                m = 1;
-                y += 1;
-            } else {
-                m += 1;
-            }
+            let (y, m) = next_month(*year_ref.borrow(), *month_ref.borrow());
             *year_ref.borrow_mut() = y;
             *month_ref.borrow_mut() = m;
             update_calendar_view(&win, y, m, *sel_ref.borrow());
@@ -421,9 +405,7 @@ fn main() {
 
             match config::save_config(&p, &cfg) {
                 Ok(_) => win.set_supplier_status("✓ Nastavení uloženo".into()),
-                Err(e) => win.set_supplier_status(
-                    format!("Chyba: {}", e).as_str().into(),
-                ),
+                Err(e) => win.set_supplier_status(format!("Chyba: {}", e).as_str().into()),
             }
         });
     }
@@ -506,7 +488,12 @@ fn main() {
                     let output_dir = Path::new(&cfg.output_dir);
                     let output_path = pdf::pdf_output_path(output_dir, &invoice.number);
 
-                    match pdf::compile(&template_data, &p.templates_dir(), &cfg.template, &output_path) {
+                    match pdf::compile(
+                        &template_data,
+                        &p.templates_dir(),
+                        &cfg.template,
+                        &output_path,
+                    ) {
                         Ok(_) => {
                             let path_str = output_path.to_string_lossy().to_string();
                             let _ = db::set_invoice_pdf_path(&conn, id, &path_str);
@@ -526,15 +513,18 @@ fn main() {
 
                             // Reset dates for next new invoice
                             let today = Local::now().date_naive();
-                            let due = today + chrono::Duration::days(supplier.default_due_days as i64);
-                            win.set_inv_issue_date(today.format("%d.%m.%Y").to_string().as_str().into());
-                            win.set_inv_due_date(due.format("%d.%m.%Y").to_string().as_str().into());
+                            let due =
+                                today + chrono::Duration::days(supplier.default_due_days as i64);
+                            win.set_inv_issue_date(
+                                today.format("%d.%m.%Y").to_string().as_str().into(),
+                            );
+                            win.set_inv_due_date(
+                                due.format("%d.%m.%Y").to_string().as_str().into(),
+                            );
                             win.set_inv_payment_method("Převodem".into());
                         }
                         Err(e) => {
-                            win.set_invoice_status(
-                                format!("Chyba PDF: {}", e).as_str().into(),
-                            );
+                            win.set_invoice_status(format!("Chyba PDF: {}", e).as_str().into());
                         }
                     }
                 }
@@ -717,7 +707,12 @@ fn main() {
                         TemplateData::from_parts(&invoice, &supplier, &customer, &items);
                     let output_dir = Path::new(&cfg.output_dir);
                     let output_path = pdf::pdf_output_path(output_dir, &invoice.number);
-                    match pdf::compile(&template_data, &p.templates_dir(), &cfg.template, &output_path) {
+                    match pdf::compile(
+                        &template_data,
+                        &p.templates_dir(),
+                        &cfg.template,
+                        &output_path,
+                    ) {
                         Ok(_) => pdf::open(&output_path),
                         Err(e) => eprintln!("PDF regeneration error: {}", e),
                     }
@@ -809,15 +804,10 @@ fn reset_invoice_form(win: &AppWindow, items: &VecModel<LineItemUI>) {
 }
 
 /// Refreshes the saved customers list and updates the UI dropdown.
-fn refresh_saved_customers(
-    conn: &Connection,
-    win: &AppWindow,
-    cache: &Rc<RefCell<Vec<Customer>>>,
-) {
+fn refresh_saved_customers(conn: &Connection, win: &AppWindow, cache: &Rc<RefCell<Vec<Customer>>>) {
     match db::list_customers(conn) {
         Ok(list) => {
-            let mut labels: Vec<slint::SharedString> =
-                vec!["-- Vyberte odběratele --".into()];
+            let mut labels: Vec<slint::SharedString> = vec!["-- Vyberte odběratele --".into()];
             for c in &list {
                 labels.push(format!("{} ({})", c.name, c.reg_id).as_str().into());
             }
@@ -845,52 +835,94 @@ fn parse_date(s: &str) -> Option<NaiveDate> {
     }
 }
 
+/// Computes the formatted due date string from an issue date string and due duration.
+fn compute_due_date_str(issue_str: &str, due_days: i32) -> Option<String> {
+    let issue_date = parse_date(issue_str)?;
+    let due_date = issue_date + chrono::Duration::days(due_days.max(1) as i64);
+    Some(due_date.format("%d.%m.%Y").to_string())
+}
+
 /// Updates the invoice due date when the issue date changes.
 fn update_due_date_from_issue(win: &AppWindow, issue_str: &str) {
-    if let Some(issue_date) = parse_date(issue_str) {
-        let due_days = win.get_sup_due_days().max(1) as i64;
-        let due_date = issue_date + chrono::Duration::days(due_days);
-        win.set_inv_due_date(due_date.format("%d.%m.%Y").to_string().as_str().into());
+    if let Some(due_str) = compute_due_date_str(issue_str, win.get_sup_due_days()) {
+        win.set_inv_due_date(due_str.as_str().into());
     }
 }
 
-/// Rebuilds the 42-day calendar model for the specified month/year.
-fn update_calendar_view(
-    win: &AppWindow,
+/// Steps back one calendar month with year rollover.
+fn prev_month(year: i32, month: u32) -> (i32, u32) {
+    if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    }
+}
+
+/// Steps forward one calendar month with year rollover.
+fn next_month(year: i32, month: u32) -> (i32, u32) {
+    if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    }
+}
+
+/// Formats the Czech month-and-year header title for the calendar popup.
+fn calendar_month_title(year: i32, month: u32) -> String {
+    let czech_months = [
+        "Leden",
+        "Únor",
+        "Březen",
+        "Duben",
+        "Květen",
+        "Červen",
+        "Červenec",
+        "Srpen",
+        "Září",
+        "Říjen",
+        "Listopad",
+        "Prosinec",
+    ];
+    let month_name = czech_months
+        .get(month.saturating_sub(1) as usize)
+        .unwrap_or(&"");
+    format!("{} {}", month_name, year)
+}
+
+/// Builds the 42-cell (6x7) Monday-first calendar grid for a given month.
+fn build_calendar_days(
     year: i32,
     month: u32,
+    today: NaiveDate,
     selected: Option<NaiveDate>,
-) {
-    let czech_months = [
-        "Leden", "Únor", "Březen", "Duben", "Květen", "Červen",
-        "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec",
-    ];
-    let month_name = czech_months.get(month.saturating_sub(1) as usize).unwrap_or(&"");
-    win.set_calendar_title(format!("{} {}", month_name, year).as_str().into());
-
-    let first_day = match NaiveDate::from_ymd_opt(year, month, 1) {
-        Some(d) => d,
-        None => return,
-    };
-
+) -> Option<Vec<CalendarDay>> {
+    let first_day = NaiveDate::from_ymd_opt(year, month, 1)?;
     let days_before = first_day.weekday().num_days_from_monday();
     let start_date = first_day - chrono::Duration::days(days_before as i64);
-    let today = Local::now().date_naive();
 
     let mut days = Vec::with_capacity(42);
     for i in 0..42 {
         let curr = start_date + chrono::Duration::days(i);
-        let in_month = curr.month() == month;
-        let is_today = curr == today;
-        let is_selected = selected == Some(curr);
         days.push(CalendarDay {
             day_text: curr.day().to_string().as_str().into(),
             date_str: curr.format("%d.%m.%Y").to_string().as_str().into(),
-            in_month,
-            is_today,
-            is_selected,
+            in_month: curr.month() == month,
+            is_today: curr == today,
+            is_selected: selected == Some(curr),
         });
     }
+    Some(days)
+}
+
+/// Rebuilds the 42-day calendar model for the specified month/year.
+fn update_calendar_view(win: &AppWindow, year: i32, month: u32, selected: Option<NaiveDate>) {
+    win.set_calendar_title(calendar_month_title(year, month).as_str().into());
+
+    let today = Local::now().date_naive();
+    let days = match build_calendar_days(year, month, today, selected) {
+        Some(d) => d,
+        None => return,
+    };
 
     let mut weeks = Vec::with_capacity(6);
     for w in 0..6 {
@@ -907,4 +939,195 @@ fn update_calendar_view(
     }
 
     win.set_calendar_weeks(Rc::new(VecModel::from(weeks)).into());
+}
+
+#[cfg(test)]
+pub(crate) mod test_util {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Isolated temporary directory guard that removes the entire directory on drop.
+    pub struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        /// Creates a unique temporary directory under `std::env::temp_dir()`.
+        pub fn new(prefix: &str) -> Self {
+            let base = std::env::temp_dir();
+            let pid = std::process::id();
+            loop {
+                let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+                let nanos = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+                let dir = base.join(format!("faktury_{}_{}_{}_{}", prefix, pid, nanos, seq));
+                match std::fs::create_dir(&dir) {
+                    Ok(()) => return Self { path: dir },
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => panic!("Failed to create temp dir {}: {}", dir.display(), e),
+                }
+            }
+        }
+
+        /// Returns the path to the temporary directory.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_temp_dir_isolation_and_cleanup() {
+        let dir1 = test_util::TestTempDir::new("same");
+        let dir2 = test_util::TestTempDir::new("same");
+        assert_ne!(dir1.path(), dir2.path());
+        assert!(dir1.path().exists());
+        assert!(dir2.path().exists());
+
+        let nested = dir1.path().join("sub").join("file.txt");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "test").unwrap();
+
+        let path1 = dir1.path().to_path_buf();
+        let path2 = dir2.path().to_path_buf();
+        drop(dir1);
+        drop(dir2);
+
+        assert!(!path1.exists());
+        assert!(!path2.exists());
+    }
+
+    #[test]
+    fn test_parse_date() {
+        assert_eq!(
+            parse_date("14.11.2026"),
+            NaiveDate::from_ymd_opt(2026, 11, 14)
+        );
+        assert_eq!(parse_date("5.3.2026"), NaiveDate::from_ymd_opt(2026, 3, 5));
+        assert_eq!(
+            parse_date(" 5 . 3 . 2026 "),
+            NaiveDate::from_ymd_opt(2026, 3, 5)
+        );
+        assert_eq!(
+            parse_date("29.02.2024"),
+            NaiveDate::from_ymd_opt(2024, 2, 29)
+        );
+        assert_eq!(parse_date("29.02.2026"), None);
+        assert_eq!(parse_date(""), None);
+        assert_eq!(parse_date("2026-11-14"), None);
+        assert_eq!(parse_date("32.01.2026"), None);
+        assert_eq!(parse_date("10.13.2026"), None);
+        assert_eq!(parse_date("abc"), None);
+        assert_eq!(parse_date("1.2"), None);
+    }
+
+    #[test]
+    fn test_compute_due_date_str() {
+        assert_eq!(
+            compute_due_date_str("14.11.2026", 14),
+            Some("28.11.2026".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("20.11.2026", 14),
+            Some("04.12.2026".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("25.12.2026", 14),
+            Some("08.01.2027".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("28.02.2024", 1),
+            Some("29.02.2024".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("28.02.2026", 1),
+            Some("01.03.2026".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("10.05.2026", 0),
+            Some("11.05.2026".to_string())
+        );
+        assert_eq!(
+            compute_due_date_str("10.05.2026", -5),
+            Some("11.05.2026".to_string())
+        );
+        assert_eq!(compute_due_date_str("invalid", 14), None);
+    }
+
+    #[test]
+    fn test_calendar_month_navigation_and_title() {
+        assert_eq!(prev_month(2026, 6), (2026, 5));
+        assert_eq!(prev_month(2026, 1), (2025, 12));
+        assert_eq!(next_month(2026, 6), (2026, 7));
+        assert_eq!(next_month(2026, 12), (2027, 1));
+
+        assert_eq!(calendar_month_title(2026, 1), "Leden 2026");
+        assert_eq!(calendar_month_title(2026, 11), "Listopad 2026");
+        assert_eq!(calendar_month_title(2026, 12), "Prosinec 2026");
+    }
+
+    #[test]
+    fn test_build_calendar_days() {
+        // November 2026 starts on Sunday -> 6 leading October days (26.10. - 31.10.)
+        let today = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
+        let selected = NaiveDate::from_ymd_opt(2026, 11, 14);
+        let nov_days = build_calendar_days(2026, 11, today, selected).unwrap();
+        assert_eq!(nov_days.len(), 42);
+
+        assert_eq!(nov_days[0].date_str.as_str(), "26.10.2026");
+        assert!(!nov_days[0].in_month);
+        assert_eq!(nov_days[6].date_str.as_str(), "01.11.2026");
+        assert_eq!(nov_days[6].day_text.as_str(), "1");
+        assert!(nov_days[6].in_month);
+        assert_eq!(nov_days[35].date_str.as_str(), "30.11.2026");
+        assert!(nov_days[35].in_month);
+        assert_eq!(nov_days[36].date_str.as_str(), "01.12.2026");
+        assert!(!nov_days[36].in_month);
+
+        assert_eq!(nov_days.iter().filter(|d| d.in_month).count(), 30);
+        assert_eq!(nov_days.iter().filter(|d| d.is_today).count(), 1);
+        assert_eq!(nov_days.iter().filter(|d| d.is_selected).count(), 1);
+        assert!(
+            nov_days
+                .iter()
+                .find(|d| d.date_str.as_str() == "20.11.2026")
+                .unwrap()
+                .is_today
+        );
+        assert!(
+            nov_days
+                .iter()
+                .find(|d| d.date_str.as_str() == "14.11.2026")
+                .unwrap()
+                .is_selected
+        );
+
+        // June 2026 starts on Monday -> 0 leading days
+        let jun_days = build_calendar_days(2026, 6, today, None).unwrap();
+        assert_eq!(jun_days.len(), 42);
+        assert_eq!(jun_days[0].date_str.as_str(), "01.06.2026");
+        assert!(jun_days[0].in_month);
+        assert_eq!(jun_days[29].date_str.as_str(), "30.06.2026");
+        assert!(jun_days[29].in_month);
+        assert_eq!(jun_days[30].date_str.as_str(), "01.07.2026");
+        assert!(!jun_days[30].in_month);
+
+        assert!(build_calendar_days(2026, 0, today, None).is_none());
+        assert!(build_calendar_days(2026, 13, today, None).is_none());
+    }
 }

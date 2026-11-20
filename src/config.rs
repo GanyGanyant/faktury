@@ -54,9 +54,15 @@ impl AppPaths {
 /// Uses `directories::ProjectDirs` and `directories::UserDirs`.
 pub fn resolve_paths() -> AppPaths {
     let (config_dir, data_dir) = if let Some(proj) = ProjectDirs::from("", "", "faktury") {
-        (proj.config_dir().to_path_buf(), proj.data_dir().to_path_buf())
+        (
+            proj.config_dir().to_path_buf(),
+            proj.data_dir().to_path_buf(),
+        )
     } else {
-        (PathBuf::from(".config/faktury"), PathBuf::from(".local/share/faktury"))
+        (
+            PathBuf::from(".config/faktury"),
+            PathBuf::from(".local/share/faktury"),
+        )
     };
 
     let default_output_dir = UserDirs::new()
@@ -72,12 +78,27 @@ pub fn resolve_paths() -> AppPaths {
 
 /// Creates required configuration, template, and data directories if missing.
 pub fn ensure_dirs(paths: &AppPaths) -> Result<(), String> {
-    std::fs::create_dir_all(&paths.config_dir)
-        .map_err(|e| format!("Failed to create config dir {}: {}", paths.config_dir.display(), e))?;
-    std::fs::create_dir_all(&paths.templates_dir())
-        .map_err(|e| format!("Failed to create templates dir {}: {}", paths.templates_dir().display(), e))?;
-    std::fs::create_dir_all(&paths.data_dir)
-        .map_err(|e| format!("Failed to create data dir {}: {}", paths.data_dir.display(), e))?;
+    std::fs::create_dir_all(&paths.config_dir).map_err(|e| {
+        format!(
+            "Failed to create config dir {}: {}",
+            paths.config_dir.display(),
+            e
+        )
+    })?;
+    std::fs::create_dir_all(paths.templates_dir()).map_err(|e| {
+        format!(
+            "Failed to create templates dir {}: {}",
+            paths.templates_dir().display(),
+            e
+        )
+    })?;
+    std::fs::create_dir_all(&paths.data_dir).map_err(|e| {
+        format!(
+            "Failed to create data dir {}: {}",
+            paths.data_dir.display(),
+            e
+        )
+    })?;
     Ok(())
 }
 
@@ -201,14 +222,11 @@ pub fn list_templates(paths: &AppPaths) -> Vec<String> {
     if let Ok(entries) = std::fs::read_dir(&tdir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "typ" {
-                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            templates.push(name.to_string());
-                        }
-                    }
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "typ")
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                templates.push(name.to_string());
             }
         }
     }
@@ -289,22 +307,20 @@ pub fn load_or_init(paths: &AppPaths) -> Result<AppConfig, String> {
     }
 
     // config.toml does not exist. Migrate supplier from legacy database if present
-    let mut config = AppConfig::default();
-    config.output_dir = paths.default_output_dir.to_string_lossy().to_string();
+    let mut config = AppConfig {
+        output_dir: paths.default_output_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
 
-    let legacy_candidates = [
-        PathBuf::from("faktury.db"),
-        paths.db_path(),
-    ];
+    let legacy_candidates = [PathBuf::from("faktury.db"), paths.db_path()];
 
     for candidate in &legacy_candidates {
-        if candidate.exists() {
-            if let Ok(conn) = Connection::open(candidate) {
-                if let Ok(Some(legacy_sup)) = load_legacy_supplier(&conn) {
-                    config.update_supplier_fields(&legacy_sup);
-                    break;
-                }
-            }
+        if candidate.exists()
+            && let Ok(conn) = Connection::open(candidate)
+            && let Ok(Some(legacy_sup)) = load_legacy_supplier(&conn)
+        {
+            config.update_supplier_fields(&legacy_sup);
+            break;
         }
     }
 
@@ -335,18 +351,19 @@ mod tests {
 
     #[test]
     fn test_config_serialization_and_defaults() {
-        let mut cfg = AppConfig::default();
-        cfg.name = "Moje Firma s.r.o.".into();
-        cfg.ico = "12345678".into();
-        cfg.dic = "CZ12345678".into();
-        cfg.street = "Karlova 10".into();
-        cfg.zip = "110 00".into();
-        cfg.city = "Praha 1".into();
-        cfg.bank_account = "123456789/0100".into();
-        cfg.iban = "CZ0000000000000012345678".into();
-        cfg.default_due_days = 21;
-        cfg.template = "moderni.typ".into();
-        cfg.output_dir = "/tmp/invoices".into();
+        let cfg = AppConfig {
+            name: "Moje Firma s.r.o.".into(),
+            ico: "12345678".into(),
+            dic: "CZ12345678".into(),
+            street: "Karlova 10".into(),
+            zip: "110 00".into(),
+            city: "Praha 1".into(),
+            bank_account: "123456789/0100".into(),
+            iban: "CZ0000000000000012345678".into(),
+            default_due_days: 21,
+            template: "moderni.typ".into(),
+            output_dir: "/tmp/invoices".into(),
+        };
 
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         assert!(toml_str.contains("name = \"Moje Firma s.r.o.\""));
@@ -379,8 +396,8 @@ mod tests {
 
     #[test]
     fn test_templates_seeding_and_listing() {
-        let temp_dir = std::env::temp_dir().join("faktury_test_paths");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = crate::test_util::TestTempDir::new("templates");
+        let temp_dir = temp.path();
 
         let paths = AppPaths {
             config_dir: temp_dir.join("config"),
@@ -399,9 +416,8 @@ mod tests {
         let custom_content = "// user edited";
         std::fs::write(paths.templates_dir().join("klasicka.typ"), custom_content).unwrap();
         ensure_default_templates(&paths);
-        let read_back = std::fs::read_to_string(paths.templates_dir().join("klasicka.typ")).unwrap();
+        let read_back =
+            std::fs::read_to_string(paths.templates_dir().join("klasicka.typ")).unwrap();
         assert_eq!(read_back, custom_content);
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

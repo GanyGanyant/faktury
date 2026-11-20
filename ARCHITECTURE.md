@@ -19,6 +19,7 @@ Tento dokument popisuje aktuální architekturu, datové toky, schémata a klí�
 - **Release & CI:**
   - Release profil v [Cargo.toml](Cargo.toml): `strip = true`, `lto = true`, `codegen-units = 1`, `opt-level = "z"`, `panic = "abort"`.
   - Release build na Windows skrývá konzolové okno (`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` v [src/main.rs](src/main.rs)).
+  - CI workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) spouštěné na `push` a `pull_request` do větve `main` ověřuje `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` a `cargo test`.
   - Release workflow [.github/workflows/release.yml](.github/workflows/release.yml) spouštěné na tazích `v*` a ručně (`workflow_dispatch`) sestavuje binárky pro Linux x64, macOS ARM64 (`aarch64-apple-darwin`) a Windows x64 a publikuje GitHub Release.
 
 ---
@@ -38,6 +39,7 @@ Tento dokument popisuje aktuální architekturu, datové toky, schémata a klí�
 | [templates/faktura.typ](templates/faktura.typ) | Výchozí klasická Typst šablona (při seedování zapisována do uživatelské složky jako `klasicka.typ`). |
 | [templates/moderni.typ](templates/moderni.typ) | Moderní Typst šablona s barevným akcentem (zapisována jako `moderni.typ`). |
 | `fonts/` | Písma `LibertinusSans-Regular.otf`, `LibertinusSans-Bold.otf`, `LibertinusSans-Italic.otf` vkládaná do binárky přes `include_bytes!`. |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI pipeline pro `push`/`pull_request` do `main` (formátování, Clippy, unit testy). |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Multi-platformní CI pipeline pro sestavení a publikaci GitHub Release. |
 
 ---
